@@ -414,7 +414,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     if (specialVideoStreamsResults[1].filter(stream => stream[2] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
-        console.log("no DV")
         response.infoLog += `☒ File says it supports Dolby Vision, However no DoVi Metadata could be found. \n`;
     }
 
