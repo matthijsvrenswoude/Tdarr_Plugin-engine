@@ -412,6 +412,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     if (specialVideoStreamsResults[1].length > 0){
         ffmpegCommandArgs.push("-strict unofficial");
     }
+    if (specialVideoStreamsResults[1].filter(stream => stream[2] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.includes(substring) || file?.meta?.Title?.includes(substring))){
+        response.infoLog += `☒ File says it supports Dolby Vision, However no DoVi Metadata could be found. \n`;
+    }
 
     ffmpegCommandArgs.push("-max_muxing_queue_size 9999");
 
