@@ -48,9 +48,14 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
 
-    function exitIfFileIsNotAVideo(file,response){
-        if (file.container !== 'mkv' && file.container !== 'mp4') {
-            response.infoLog += '☒ File is not video \n';
+    function exitIfFileIsNotProcessable(file,response){
+        if (file.container !== 'srt' && file.container !== 'mkv' && file.container !== 'mp4') {
+            response.infoLog += '☒ File is not processable \n';
+            response.processFile = false;
+            return response;
+        }
+        if (file.file.includes("/backup/")) {
+            response.infoLog += '☒ File is a backup folder \n';
             response.processFile = false;
             return response;
         }
@@ -81,16 +86,73 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return files.filter(file => file[1].endsWith(".srt"));
     }
 
-    function rewriteSubtitleContent(filePath){
+    function createFolder(newFolder){
+        if (!fs.existsSync(newFolder)){
+            fs.mkdirSync(newFolder);
+        }
+    }
+
+
+    function rewriteSubtitleLine(line) {
+        let result = '';
+        line = line.trim();
+        let lineLowerCase = line.toLowerCase();
+
+        if (lineLowerCase.includes("https://")
+            || lineLowerCase.includes("opensubtitles")
+            || lineLowerCase.includes("bewerkt door")
+            || lineLowerCase.includes("translation by")
+            || lineLowerCase.includes("vertaling:")
+            || lineLowerCase.includes("translation:")){
+            line = "";
+        }
+
+        line = line.replaceAll("{\\an8}","").replaceAll("♪♪","♪");
+        if (line === "♪"){line = ""}
+
+
+        let startParenthesesFound = false;
+        let startBracketsFound = false;
+        for (const char of line) {
+            if (char === '('){
+                startParenthesesFound = true;
+                continue;
+            }
+            if (char === '['){
+                startBracketsFound = true;
+                continue;
+            }
+
+            if (startParenthesesFound === false && startBracketsFound  === false){
+                if (char === "?"){
+                    result += `${char} `;
+                }
+                result += char;
+            }
+
+            if (char === ']'){
+                startParenthesesFound = false;
+                continue;
+            }
+            if (char === ']'){
+                startBracketsFound = false;
+                continue;
+            }
+        }
+
+        return result.split(' ').map(word => word.trim()).join(' ').trim();
+    }
+
+    function rewriteSubtitleContent(filePath, newFilePath){
+
         fs.readFileSync(filePath, 'utf-8').split(/\r?\n/).forEach(function(line){
-            console.log(line);
+            rewriteSubtitleLine(line);
         })
+
     }
 
     function ProcessSubtitles(currentMediaFileDirectory,currentMediaFileName, response){
         const subtitleImportFolderName = "backup";
-        const allFiles = fetchAllFilesFromGivenFolder(currentMediaFileDirectory).map(file => getFileDetails(file));
-        const allSubtitleFiles = filterOnlySubtitleFiles(allFiles);
 
         const allSubtitleFileData = allSubtitleFiles.map(file => {
             const fileName = file[0];
@@ -139,11 +201,11 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             }
 
 
-            if (shouldAddSubtitle){
-                fs.renameSync(`${selectedSubtitleFileDirectory}${selectedSubtitleFileName}`,`${newSubtitleFolder}${newSelectedSubtitleName}`)
-                subtitleFFmpegCommandArgs.push(`-i ${subtitleImportFolderName}/${newSelectedSubtitleName}`);
-                delayedSubtitleFFmpegCommandArgs.push(``);
-            }
+            // if (shouldAddSubtitle){
+            //     fs.renameSync(`${selectedSubtitleFileDirectory}${selectedSubtitleFileName}`,`${newSubtitleFolder}${newSelectedSubtitleName}`)
+            //     subtitleFFmpegCommandArgs.push(`-i ${subtitleImportFolderName}/${newSelectedSubtitleName}`);
+            //     delayedSubtitleFFmpegCommandArgs.push(``);
+            // }
         })
         //create backup folder
         //move to backup folder
@@ -153,7 +215,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
 
 
+
         //filter file
+        // remove anything between () and []
         //including {\an8}
         //and empty music notes
 
@@ -172,11 +236,22 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const isFileErroredResponse = ifFileErrorExecuteReenqueue(file,response);
     if (isFileErroredResponse !== false) return isFileErroredResponse;
 
-    const videoCheckResponse = exitIfFileIsNotAVideo(file, response);
+    const videoCheckResponse = exitIfFileIsNotProcessable(file, response);
     if (videoCheckResponse !== false) return videoCheckResponse;
 
-    const processSubtitleResults = ProcessSubtitles(currentMediaFileDirectory,currentMediaFileName, response);
+    const backupFolder = `${currentMediaFileDirectory}/backup/`;
 
+
+    if (currentMediaFileName.includes(".mp4") || currentMediaFileName.includes("mkv")){
+        const allFiles = fetchAllFilesFromGivenFolder(currentMediaFileDirectory).map(file => getFileDetails(file));
+        const allSubtitleFiles = filterOnlySubtitleFiles(allFiles);
+        createFolder(backupFolder);
+
+
+    } else if (currentMediaFileName.includes(".srt")){
+        const processSubtitleResults = ProcessSubtitle(currentMediaFileDirectory,currentMediaFileName, response);
+        createFolder(backupFolder);
+    }
 
 
     return response;

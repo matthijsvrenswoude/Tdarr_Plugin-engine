@@ -356,14 +356,14 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             return indexA - indexB;
         })
 
-        subtitleTracksOrder.forEach((SubtitleTrack, index) => {
+        subtitleTracksOrder.forEach((SubtitleTrack, mappedSubtitleIndex) => {
             const subtitleStreamsId = SubtitleTrack[0];
             const keepSubtitleStream = SubtitleTrack[2];
 
-            if (index === 0 && keepSubtitleStream){
+            if (mappedSubtitleIndex === 0 && keepSubtitleStream){
                 subtitleFFmpegCommandArgs.push(`-map 0:s:${subtitleStreamsId} -disposition:s:0 default`)
             } else{
-                subtitleFFmpegCommandArgs.push(`-map ${keepSubtitleStream ? "" : "-"}0:s:${subtitleStreamsId} ${keepSubtitleStream ? `-disposition:s:${subtitleStreamsId} 0` : ""}`);
+                subtitleFFmpegCommandArgs.push(`-map ${keepSubtitleStream ? "" : "-"}0:s:${subtitleStreamsId} ${keepSubtitleStream ? `-disposition:s:${mappedSubtitleIndex} 0` : ""}`);
             }
         });
 
