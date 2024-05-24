@@ -299,18 +299,18 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const extractCodecTag = extractCodec[0];
             const extractCodecMinimumChannels = extractCodec[1];
             const extractCodecFileExtension = extractCodec[2];
-            availableAudioStreams.map(availableAudioStream => {
+            availableAudioStreams.map((availableAudioStream, mappedAudioStreamId) => {
                 const currentStreamCodecTag = availableAudioStream[0];
                 const currentStreamChannels = availableAudioStream[1];
                 const currentStreamLanguage = availableAudioStream[4].substring(0, 2);
                 if (availableAudioStream[7] === false && extractCodecTag === currentStreamCodecTag && extractCodecMinimumChannels <= currentStreamChannels){
-                    const createNewUniqueFileName = (number) => `${currentMediaFileName}.${currentStreamLanguage}${number > 0 ? `.${number}` : ""}.${extractCodecFileExtension}`;
+                    const createNewUniqueFileName = (number) => `${currentMediaFileName.replace(".mkv","")}.${currentStreamLanguage}${number > 0 ? `.${number}` : ""}.${extractCodecFileExtension}`;
                     let uniqueFileNameCounter = 0;
                     let newFileName = createNewUniqueFileName(uniqueFileNameCounter);
                     while (extractedFiles.includes(newFileName)) {
                         newFileName = createNewUniqueFileName(uniqueFileNameCounter)
                     }
-                    audioFFmpegExportCommandArgs.push(`-map_metadata 0:s:a:0 -map 0:a:0 -c copy -strict unofficial "${currentMediaFileName}.${currentStreamLanguage}.${extractCodecFileExtension}"`);
+                    audioFFmpegExportCommandArgs.push(`-map_metadata 0:s:a:0 -map 0:a:${mappedAudioStreamId} -c copy -strict unofficial "${newFileName}"`);
                     extractedFiles.push(newFileName);
                 }
             })
