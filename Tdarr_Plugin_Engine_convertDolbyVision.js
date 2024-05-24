@@ -315,7 +315,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 }
             })
         });
-        return [response, [audioFFmpegExportCommandArgs.join(" "),audioFFmpegMappingCommandArgs.join(" "),audioFFmpegSettingsCommandArgs.join(" ")]];
+        return [response, [audioFFmpegExportCommandArgs.join(" "), audioFFmpegMappingCommandArgs.join(" "), audioFFmpegSettingsCommandArgs.join(" ")]];
     }
 
     const isFileErroredResponse = ifFileErrorExecuteReenqueue(file, response);
@@ -330,16 +330,18 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
 
     let ffmpegCommandArgs = [
-        `, -metadata title=\"${currentMediaTitle}\" -c copy -c:s mov_text -strict unofficial -map 0`
+        `,`
     ];
 
     const reworkedAudioResults = reworkAudioStreams(inputs, response, currentMediaFileName);
     response = reworkedAudioResults[0];
-    ffmpegCommandArgs.push(reworkedAudioResults[1]);
+    ffmpegCommandArgs.push(reworkedAudioResults[1][0]);
 
-    return;
+    ffmpegCommandArgs.push(`-map 0:v ${reworkedAudioResults[1][1]} -map 0:s`);
 
+    ffmpegCommandArgs.push(reworkedAudioResults[1][2]);
 
+    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c copy -c:s mov_text -strict unofficial`);
 
     response.processFile = true;
     response.preset = ffmpegCommandArgs.join(" ");
