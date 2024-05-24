@@ -187,7 +187,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const currentStreamChannels = currentStream?.channels;
             const currentStreamChannelLayout = currentStream?.channel_layout;
             const currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
-            const currentStreamLanguage = currentStream?.language ?? "und";
+            const currentStreamLanguage = currentStream?.tags?.language ?? "und";
             let  currentStreamCodecTag = currentStreamCodec;
             if (currentStreamProfile){
                 currentStreamCodecTag = `${currentStreamCodecTag}:${currentStreamProfile}`;
@@ -307,7 +307,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     const createNewUniqueFileName = (number) => `${currentMediaFileName}.${currentStreamLanguage}${number > 0 ? `.${number}` : ""}.${extractCodecFileExtension}`;
                     let uniqueFileNameCounter = 0;
                     let newFileName = createNewUniqueFileName(uniqueFileNameCounter);
-                    while (!extractedFiles.includes(newFileName)) {
+                    while (extractedFiles.includes(newFileName)) {
                         newFileName = createNewUniqueFileName(uniqueFileNameCounter)
                     }
                     audioFFmpegExportCommandArgs.push(`-map_metadata 0:s:a:0 -map 0:a:0 -c copy -strict unofficial "${currentMediaFileName}.${currentStreamLanguage}.${extractCodecFileExtension}"`);
@@ -341,7 +341,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     ffmpegCommandArgs.push(reworkedAudioResults[1][2]);
 
-    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c copy -c:s mov_text -strict unofficial`);
+    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text -strict unofficial`);
 
     response.processFile = true;
     response.preset = ffmpegCommandArgs.join(" ");
