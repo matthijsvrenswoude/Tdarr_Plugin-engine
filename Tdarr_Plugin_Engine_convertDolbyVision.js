@@ -147,10 +147,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         const allAudioStreams = file.ffProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "audio");
 
         const codecQualityOrder = [
-            "truehd",
             "dts:DTS-HD MA",
-            "eac3",
+            "truehd",
             "dts:DTS-HD",
+            "eac3",
             "dts:DTS",
             "opus",
             "ac3",
@@ -159,7 +159,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
         //Codec, Max bitrate, max channels
         const mp4CompatibleCodecs = [
-            ["truehd",18000000,32],
             ["eac3",1664000,8],
             ["ac3",640000,6],
             ["aac:LC",256000,2],
@@ -234,7 +233,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         let audioFFmpegSettingsCommandArgs = [];
         let toKeepAudioCodecDetails = passTroughCodecs.concat(targetCodecs);
 
-        availableAudioStreams = availableAudioStreams.map((availableAudioStream, mappedAudioStreamId) => {
+        let mappedAudioStreamId = 0;
+        availableAudioStreams = availableAudioStreams.map((availableAudioStream) => {
             const currentStreamCodecTag = availableAudioStream[0];
             const currentStreamChannels = availableAudioStream[1];
             const currentStreamChannelLayout = availableAudioStream[2];
@@ -258,22 +258,26 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             if (!defaultAudioSet && keepAudioStream){
                 audioFFmpegMappingCommandArgs.push(`-map 0:a:${audioStreamsId}`);
                 audioFFmpegSettingsCommandArgs.push(`-disposition:a:${mappedAudioStreamId} default`);
-                audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
+                audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
                 defaultAudioSet = true;
             } else{
-                audioFFmpegMappingCommandArgs.push(`-map ${keepAudioStream ? "" : "-"}0:a:${audioStreamsId}`);
                 if (keepAudioStream){
+                    audioFFmpegMappingCommandArgs.push(`-map 0:a:${audioStreamsId}`);
                     audioFFmpegSettingsCommandArgs.push(`-disposition:a:${mappedAudioStreamId} 0`);
-                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
+                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
                 }
             }
 
             availableAudioStream[6] = mappedAudioStreamId;
             availableAudioStream.push(keepAudioStream);
+
+            if (keepAudioStream){
+                mappedAudioStreamId++;
+            }
             return availableAudioStream;
         });
 
-        let currentMappedStreamsCount = availableAudioStreams.length;
+        let currentMappedStreamsCount = availableAudioStreams.filter(availableAudioStream => availableAudioStream[7] === true).length;
         const bestAudioStreamChannels = bestSourceAudio[1];
         const bestAudioStreamChannelLayout = bestSourceAudio[2];
         const bestAudioStreamBitrate = bestSourceAudio[3];
@@ -282,7 +286,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         targetCodecs.forEach((targetCodec) => {
             const doesCodecAlreadyExists = availableAudioStreams.find(availableAudioStream => availableAudioStream[0] === targetCodec[0] && availableAudioStream[7] === true);
             if (!doesCodecAlreadyExists){
-                const newAudioStreamCodec = targetCodec[0];
+                let newAudioStreamCodec = targetCodec[0];
                 const newAudioStreamBitrate = targetCodec[1];
                 let newAudioStreamChannels = targetCodec[2];
 
@@ -294,6 +298,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     const formattedNewAudioStreamBitrate = newAudioStreamBitrate > 10000 ? `${newAudioStreamBitrate / 1000}k` : newAudioStreamBitrate;
                     const audioStreamTitle = getAudioTrackTitle(newAudioStreamCodec,bestAudioStreamChannelLayout,bestAudioStreamLanguage);
                     audioFFmpegMappingCommandArgs.push(`-map 0:a:${bestAudioStreamId}`);
+                    if (newAudioStreamCodec === "aac:LC"){
+                        newAudioStreamCodec = "aac";
+                    }
                     audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${currentMappedStreamsCount} title="${audioStreamTitle}" -c:a:${currentMappedStreamsCount} ${newAudioStreamCodec} -b:a:${currentMappedStreamsCount} ${formattedNewAudioStreamBitrate} -ac:a:${currentMappedStreamsCount} ${newAudioStreamChannels}`);
                     currentMappedStreamsCount++;
                 }
@@ -321,7 +328,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 }
             })
         });
-        return [response, [audioFFmpegExportCommandArgs.join(" "), audioFFmpegMappingCommandArgs.join(" "), audioFFmpegSettingsCommandArgs.join(" ")]];
+        return [response, [audioFFmpegExportCommandArgs.join(" "), audioFFmpegMappingCommandArgs.join(" "), audioFFmpegSettingsCommandArgs.join(" ")], availableAudioStreams];
     }
 
     const isFileErroredResponse = ifFileErrorExecuteReenqueue(file, response);
@@ -340,13 +347,20 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const reworkedAudioResults = reworkAudioStreams(inputs, response, currentMediaFileName, cacheFileDirectory);
     response = reworkedAudioResults[0];
+    const keptAudioStreams =  reworkedAudioResults[2];
     ffmpegCommandArgs.push(reworkedAudioResults[1][0]);
 
     ffmpegCommandArgs.push(`-map 0:v ${reworkedAudioResults[1][1]} -map 0:s`);
 
     ffmpegCommandArgs.push(reworkedAudioResults[1][2]);
 
-    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text -strict unofficial`);
+    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
+
+    if(keptAudioStreams.some(keptAudioStream => ["truehd"].includes(keptAudioStream[0]))){
+        ffmpegCommandArgs.push("-strict experimental");
+    } else{
+        ffmpegCommandArgs.push("-strict unofficial");
+    }
 
     response.processFile = true;
     response.preset = ffmpegCommandArgs.join(" ");
