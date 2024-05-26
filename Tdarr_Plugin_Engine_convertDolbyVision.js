@@ -103,8 +103,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             if (currentStream.side_data_list && Array.isArray(currentStream.side_data_list)){
                 currentStream.side_data_list.forEach(sideData => {
                     const dolbyVisionProfile = sideData?.dv_profile;
-                    const dolbyVisionLevel = sideData?.dv_level;
-                    if (dolbyVisionProfile && dolbyVisionLevel){
+                    if (dolbyVisionProfile){
                         if (dolbyVisionProfile == 5 || dolbyVisionProfile == 8 || dolbyVisionProfile == 7){
                             response.infoLog += `Found: Dolby vision stream profile ${dolbyVisionProfile} \n`;
                             dolbyVisionStreams.push([videoStreamsId,currentStream,dolbyVisionProfile]);
@@ -382,8 +381,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const isCleanedCheckResponse = exitIfFileIsNotProcessable(file, response);
     if (isCleanedCheckResponse !== false) return isCleanedCheckResponse;
-
-    console.log(file.ffProbeData);
 
     const dolbyVisionStreamsDetails = getFileDolbyVisionData(file.ffProbeData, response);
     response = dolbyVisionStreamsDetails[1];
