@@ -322,7 +322,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     if (newAudioStreamCodec === "aac:LC"){
                         newAudioStreamCodec = "aac";
                     }
-                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${currentMappedStreamsCount} title=${audioStreamTitle} -c:a:${currentMappedStreamsCount} ${newAudioStreamCodec} -b:a:${currentMappedStreamsCount} ${formattedNewAudioStreamBitrate} -ac:a:${currentMappedStreamsCount} ${newAudioStreamChannels}`);
+                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${currentMappedStreamsCount} title="${audioStreamTitle}" -c:a:${currentMappedStreamsCount} ${newAudioStreamCodec} -b:a:${currentMappedStreamsCount} ${formattedNewAudioStreamBitrate} -ac:a:${currentMappedStreamsCount} ${newAudioStreamChannels}`);
                     currentMappedStreamsCount++;
                 }
             }

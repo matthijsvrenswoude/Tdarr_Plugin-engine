@@ -385,7 +385,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 }
 
                 const audioStreamTitle = getAudioTrackTitle(currentStreamCodecTag,currentStreamChannelLayout,currentStreamLanguage,currentStreamTitle);
-                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title=${audioStreamTitle}`);
+                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}"`);
             }
         });
 
