@@ -250,8 +250,21 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return string.charAt(0).toUpperCase() + string.slice(1);
     }
 
-    function getAudioTrackTitle(codec,channelLayout,language,currentTitle){
-        const isAtmosTrack = currentTitle.toLowerCase().includes("atmos");
+    function parseChannelsToChannelLayout(channels){
+        if (channels <= 2){
+            return `${channels}.0`;
+        }
+        if (channels <= 8){
+            return `${channels - 1}.1`;
+        }
+        return "";
+    }
+
+    function getAudioTrackTitle(codec,channelLayout,language){
+        if (Number.isInteger(channelLayout)){
+            channelLayout = parseChannelsToChannelLayout(channelLayout);
+        }
+
         const languageCode = language.toLowerCase().substring(0, 2)
         const languageDictionary = new Map([
             ['en', 'English'],
@@ -280,7 +293,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             codecName = codecDictionary.get(codec);
         }
 
-        return `${languageName} - ${codecName}${isAtmosTrack ? " Atmos" : ""}${channelLayout ? ` ${channelLayout}` : ""}`;
+        return `${languageName} - ${codecName}${channelLayout ? ` ${channelLayout}` : ""}`;
     }
 
 
