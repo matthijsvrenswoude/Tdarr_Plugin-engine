@@ -173,6 +173,19 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return false
     }
 
+    function getMediaTitle(file){
+        const metaTitleTag = file?.meta?.Title?.toString()?.trim();
+        const mp4TitleTag = file?.ffProbeData?.format?.tags?.title?.trim();
+        let mediaTitle = file?.meta?.FileName ?? "";
+        if (metaTitleTag){
+            mediaTitle = metaTitleTag;
+        }
+        if (mp4TitleTag){
+            mediaTitle = metaTitleTag;
+        }
+        return mediaTitle;
+    }
+
     function cleanMediaTitle(currentMediaTitle){
         return currentMediaTitle.replaceAll('"',"")
             .replace(".mkv","")
@@ -443,7 +456,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [response, subtitleFFmpegCommandArgs.join(" ")];
     }
 
-    let currentMediaTitle = file?.meta?.Title?.toString() ?? file?.meta?.FileName ?? "";
+    let currentMediaTitle = getMediaTitle(file);
     currentMediaTitle = cleanMediaTitle(currentMediaTitle);
 
     const isFileErroredResponse = ifFileErrorExecuteReenqueue(file, response);

@@ -54,6 +54,19 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return false;
     }
 
+    function getMediaTitle(file){
+        const metaTitleTag = file?.meta?.Title?.toString()?.trim();
+        const mp4TitleTag = file?.ffProbeData?.format?.tags?.title?.trim();
+        let mediaTitle = file?.meta?.FileName ?? "";
+        if (metaTitleTag){
+            mediaTitle = metaTitleTag;
+        }
+        if (mp4TitleTag){
+            mediaTitle = metaTitleTag;
+        }
+        return mediaTitle;
+    }
+
     function cleanMediaTitle(currentMediaTitle){
         return currentMediaTitle.replaceAll('"',"")
             .replace(".mkv","")
@@ -61,7 +74,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             .replaceAll(".", " ")
             .replaceAll(",","");
     }
-
 
     function getFileDetails(file){
         const fileParts = file.replaceAll("/","\\").split("\\");
@@ -81,7 +93,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         fs.writeFileSync(`${currentMediaFileDirectory}/unsupported.DV`, JSON.stringify(data));
     }
 
-    let currentMediaTitle = file?.meta?.Title?.toString() ?? file?.meta?.FileName ?? "";
+    let currentMediaTitle = getMediaTitle(file);
     currentMediaTitle = cleanMediaTitle(currentMediaTitle);
 
     function getFileDolbyVisionData(fileFFProbeData, response){
@@ -370,6 +382,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const isCleanedCheckResponse = exitIfFileIsNotProcessable(file, response);
     if (isCleanedCheckResponse !== false) return isCleanedCheckResponse;
+
+    console.log(file.ffProbeData);
 
     const dolbyVisionStreamsDetails = getFileDolbyVisionData(file.ffProbeData, response);
     response = dolbyVisionStreamsDetails[1];
