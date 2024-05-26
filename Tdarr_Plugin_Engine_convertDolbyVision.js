@@ -21,6 +21,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const { execSync } = require('child_process');
     inputs = lib.loadDefaultValues(inputs, details);
 
+    const mkvExtractPath = otherArguments.mkvpropeditPath?.replace("mkvpropedit","mkvextract");
     let response = {
         processFile: false,
         preset: "",
@@ -55,20 +56,21 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     function getMediaTitle(file){
-        const metaTitleTag = file?.meta?.Title?.toString()?.trim();
-        const mp4TitleTag = file?.ffProbeData?.format?.tags?.title?.trim();
+        const metaTitleTag = file?.meta?.Title?.toString()?.trim() ?? "";
+        const mp4TitleTag = file?.ffProbeData?.format?.tags?.title?.trim() ?? "";
         let mediaTitle = file?.meta?.FileName ?? "";
-        if (metaTitleTag){
+        if (metaTitleTag.trim().length > 0){
             mediaTitle = metaTitleTag;
         }
-        if (mp4TitleTag){
+        if (mp4TitleTag.trim().length === 0){
             mediaTitle = metaTitleTag;
         }
         return mediaTitle;
     }
 
     function cleanMediaTitle(currentMediaTitle){
-        return currentMediaTitle.replaceAll('"',"")
+        return currentMediaTitle
+            .replaceAll('"',"")
             .replace(".mkv","")
             .replace(".mp4","")
             .replaceAll(".", " ")
@@ -392,7 +394,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     let ffmpegCommandArgs = [`,`];
     let mkvExtractCommandArgs = [
-        `mkvextract tracks "${currentMediaFileDirectory}${currentMediaFileName}"`
+        `${mkvExtractPath} tracks "${currentMediaFileDirectory}${currentMediaFileName}"`
     ];
 
     const reworkedAudioResults = reworkAudioStreams(inputs, response, currentMediaFileName, currentMediaFileDirectory);
