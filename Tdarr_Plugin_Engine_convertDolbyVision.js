@@ -18,6 +18,7 @@ const details = () => {
 const plugin = (file, librarySettings, inputs, otherArguments) => {
     const lib = require('../methods/lib')();
     const fs = require('fs')
+    const { execSync } = require('child_process');
     inputs = lib.loadDefaultValues(inputs, details);
 
     let response = {
@@ -68,9 +69,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [filePath, fileName];
     }
 
-    const cacheFilePath = otherArguments.cacheFilePath ?? "";
-    const cacheFileDirectory = getFileDetails(cacheFilePath)[0];
-
     const currentMediaFilePath = file.file;
 
     const currentMediaFileDetails = getFileDetails(currentMediaFilePath);
@@ -111,7 +109,21 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return string.charAt(0).toUpperCase() + string.slice(1);
     }
 
+    function parseChannelsToChannelLayout(channels){
+        if (channels <= 2){
+            return `${channels}.0`;
+        }
+        if (channels <= 8){
+            return `${channels - 1}.1`;
+        }
+        return "";
+    }
+
     function getAudioTrackTitle(codec,channelLayout,language){
+        if (Number.isInteger(channelLayout)){
+            channelLayout = parseChannelsToChannelLayout(channelLayout);
+        }
+
         const languageCode = language.toLowerCase().substring(0, 2)
         const languageDictionary = new Map([
             ['en', 'English'],
@@ -143,8 +155,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return `${languageName} - ${codecName}${channelLayout ? ` ${channelLayout}` : ""}`;
     }
 
-    function reworkAudioStreams(inputs, response, currentMediaFileName, cacheFileDirectory){
-        const allAudioStreams = file.ffProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "audio");
+    function reworkAudioStreams(inputs, response, currentMediaFileName, outputFileDirectory){
+        const allStreams = file.ffProbeData.streams;
 
         const codecQualityOrder = [
             "dts:DTS-HD MA",
@@ -157,33 +169,36 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             "aac:LC"
         ];
 
-        //Codec, Max bitrate, max channels (Truehd according to MP4 Spec is supported, however Ffmpeg muxing to mp4 isnt stable enough)
+        // Codec, Max bitrate, max channels (Truehd according to MP4 Spec is supported, however Ffmpeg muxing to mp4 isnt stable enough)
         const mp4CompatibleCodecs = [
             ["eac3",1664000,8],
             ["ac3",640000,6],
             ["aac:LC",256000,2],
         ];
 
-        //Codec, Minimum channels, File extension
+        // Codec, Minimum channels, File extension
         const extractCodecs = [
             ["dts:DTS-HD MA",6,"dts"],
             ["truehd",0,"thd"]
         ];
 
-        //Codec, Minimum bitrate, Minimum channels
+        // Codec, Minimum bitrate, Minimum channels
         const passTroughCodecs = [
             ["eac3",1024000,6],
             ["opus",0,6]
         ];
 
-        //Codec, target bitrate, target channels
+        // Codec, target bitrate, target channels
         const targetCodecs = [
             ["ac3",640000,6],
             ["aac:LC",256000,2]
         ];
 
         let availableAudioStreams = [];
-        allAudioStreams.forEach((currentStream, audioStreamsId) => {
+        let audioStreamsId = 0;
+        allStreams.forEach((currentStream, globalStreamId) => {
+            if (currentStream.codec_type.toLowerCase() !== "audio") return;
+
             const currentStreamCodec = currentStream?.codec_name?.toLowerCase() ?? "";
             const currentStreamProfile = currentStream?.profile ?? "";
             const currentStreamChannels = currentStream?.channels;
@@ -207,8 +222,12 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 currentStreamBitRate,
                 currentStreamLanguage,
                 audioStreamsId,
+                globalStreamId,
                 0,
             ])
+            if (currentStream.codec_type.toLowerCase() === "audio"){
+                audioStreamsId++;
+            }
         });
 
         availableAudioStreams.sort((a, b) => {
@@ -228,7 +247,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
         const bestSourceAudio = availableAudioStreams[0];
         let defaultAudioSet = false;
-        let audioFFmpegExportCommandArgs = [];
+        let mkvExtractCommandArgs = [];
         let audioFFmpegMappingCommandArgs = [];
         let audioFFmpegSettingsCommandArgs = [];
         let toKeepAudioCodecDetails = passTroughCodecs.concat(targetCodecs);
@@ -268,7 +287,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 }
             }
 
-            availableAudioStream[6] = mappedAudioStreamId;
+            availableAudioStream[7] = mappedAudioStreamId;
             availableAudioStream.push(keepAudioStream);
 
             if (keepAudioStream){
@@ -277,26 +296,28 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             return availableAudioStream;
         });
 
-        let currentMappedStreamsCount = availableAudioStreams.filter(availableAudioStream => availableAudioStream[7] === true).length;
+        let currentMappedStreamsCount = availableAudioStreams.filter(availableAudioStream => availableAudioStream[8] === true).length;
         const bestAudioStreamChannels = bestSourceAudio[1];
         const bestAudioStreamChannelLayout = bestSourceAudio[2];
         const bestAudioStreamBitrate = bestSourceAudio[3];
         const bestAudioStreamLanguage = bestSourceAudio[4];
         const bestAudioStreamId = bestSourceAudio[5];
         targetCodecs.forEach((targetCodec) => {
-            const doesCodecAlreadyExists = availableAudioStreams.find(availableAudioStream => availableAudioStream[0] === targetCodec[0] && availableAudioStream[7] === true);
+            const doesCodecAlreadyExists = availableAudioStreams.find(availableAudioStream => availableAudioStream[0] === targetCodec[0] && availableAudioStream[8] === true);
             if (!doesCodecAlreadyExists){
                 let newAudioStreamCodec = targetCodec[0];
                 const newAudioStreamBitrate = targetCodec[1];
                 let newAudioStreamChannels = targetCodec[2];
+                let newAudioStreamChannelLayout = bestAudioStreamChannelLayout;
 
                 if (bestAudioStreamBitrate > newAudioStreamBitrate){
                     if (bestAudioStreamChannels < newAudioStreamChannels){
                         newAudioStreamChannels = bestAudioStreamChannels;
+                        newAudioStreamChannelLayout = bestAudioStreamChannels;
                     }
 
                     const formattedNewAudioStreamBitrate = newAudioStreamBitrate > 10000 ? `${newAudioStreamBitrate / 1000}k` : newAudioStreamBitrate;
-                    const audioStreamTitle = getAudioTrackTitle(newAudioStreamCodec,bestAudioStreamChannelLayout,bestAudioStreamLanguage);
+                    const audioStreamTitle = getAudioTrackTitle(newAudioStreamCodec,newAudioStreamChannelLayout,bestAudioStreamLanguage);
                     audioFFmpegMappingCommandArgs.push(`-map 0:a:${bestAudioStreamId}`);
                     if (newAudioStreamCodec === "aac:LC"){
                         newAudioStreamCodec = "aac";
@@ -312,23 +333,24 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const extractCodecTag = extractCodec[0];
             const extractCodecMinimumChannels = extractCodec[1];
             const extractCodecFileExtension = extractCodec[2];
-            availableAudioStreams.map((availableAudioStream, mappedAudioStreamId) => {
+            availableAudioStreams.map((availableAudioStream) => {
                 const currentStreamCodecTag = availableAudioStream[0];
                 const currentStreamChannels = availableAudioStream[1];
                 const currentStreamLanguage = availableAudioStream[4].substring(0, 2);
-                if (availableAudioStream[7] === false && extractCodecTag === currentStreamCodecTag && extractCodecMinimumChannels <= currentStreamChannels){
+                const currentStreamGlobalStreamId = availableAudioStream[6];
+                if (availableAudioStream[8] === false && extractCodecTag === currentStreamCodecTag && extractCodecMinimumChannels <= currentStreamChannels){
                     const createNewUniqueFileName = (number) => `${currentMediaFileName.replace(".mkv","")}.${currentStreamLanguage}${number > 0 ? `.${number}` : ""}.${extractCodecFileExtension}`;
                     let uniqueFileNameCounter = 0;
                     let newFileName = createNewUniqueFileName(uniqueFileNameCounter);
                     while (extractedFiles.includes(newFileName)) {
                         newFileName = createNewUniqueFileName(uniqueFileNameCounter)
                     }
-                    audioFFmpegExportCommandArgs.push(`-map_metadata 0:s:a:${mappedAudioStreamId} -map 0:a:${mappedAudioStreamId} -c copy -strict unofficial "${cacheFileDirectory}${newFileName}"`);
+                    mkvExtractCommandArgs.push(`${currentStreamGlobalStreamId}:"${outputFileDirectory}${newFileName}"`)
                     extractedFiles.push(newFileName);
                 }
             })
         });
-        return [response, [audioFFmpegExportCommandArgs.join(" "), audioFFmpegMappingCommandArgs.join(" "), audioFFmpegSettingsCommandArgs.join(" ")], availableAudioStreams];
+        return [response, [mkvExtractCommandArgs.join(" "), audioFFmpegMappingCommandArgs.join(" "), audioFFmpegSettingsCommandArgs.join(" ")], availableAudioStreams];
     }
 
     const isFileErroredResponse = ifFileErrorExecuteReenqueue(file, response);
@@ -341,25 +363,29 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     if (dolbyVisionStreams.length === 0) return response;
 
 
-    let ffmpegCommandArgs = [
-        `,`
+    let ffmpegCommandArgs = [`,`];
+    let mkvExtractCommandArgs = [
+        `mkvextract tracks "${currentMediaFileDirectory}${currentMediaFileName}"`
     ];
 
-    const reworkedAudioResults = reworkAudioStreams(inputs, response, currentMediaFileName, cacheFileDirectory);
+    const reworkedAudioResults = reworkAudioStreams(inputs, response, currentMediaFileName, currentMediaFileDirectory);
     response = reworkedAudioResults[0];
-    const keptAudioStreams =  reworkedAudioResults[2];
-    ffmpegCommandArgs.push(reworkedAudioResults[1][0]);
+    const audioFFmpegMappingCommandArgs = reworkedAudioResults[1][1];
+    const audioFFmpegSettingsCommandArgs = reworkedAudioResults[1][2];
 
-    ffmpegCommandArgs.push(`-map 0:v ${reworkedAudioResults[1][1]} -map 0:s`);
+    mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
 
-    ffmpegCommandArgs.push(reworkedAudioResults[1][2]);
-
+    ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s`);
+    ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
     ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
+    ffmpegCommandArgs.push("-strict unofficial");
 
-    if(keptAudioStreams.some(keptAudioStream => ["truehd"].includes(keptAudioStream[0]))){
-        ffmpegCommandArgs.push("-strict experimental");
-    } else{
-        ffmpegCommandArgs.push("-strict unofficial");
+
+    if (mkvExtractCommandArgs.length > 1){
+        let mkvExtractOutput = execSync(ffmpegCommandArgs.join(" "));
+        response.info += "-------------------";
+        response.info += mkvExtractOutput;
+        response.info += "-------------------";
     }
 
     response.processFile = true;
