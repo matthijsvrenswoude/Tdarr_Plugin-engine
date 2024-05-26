@@ -157,7 +157,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             "aac:LC"
         ];
 
-        //Codec, Max bitrate, max channels
+        //Codec, Max bitrate, max channels (Truehd according to MP4 Spec is supported, however Ffmpeg muxing to mp4 isnt stable enough)
         const mp4CompatibleCodecs = [
             ["eac3",1664000,8],
             ["ac3",640000,6],
@@ -166,12 +166,12 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
         //Codec, Minimum channels, File extension
         const extractCodecs = [
-            ["dts:DTS-HD MA",6,"dts"]
+            ["dts:DTS-HD MA",6,"dts"],
+            ["truehd",0,"thd"]
         ];
 
         //Codec, Minimum bitrate, Minimum channels
         const passTroughCodecs = [
-            ["truehd",0,0],
             ["eac3",1024000,6],
             ["opus",0,6]
         ];

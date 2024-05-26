@@ -246,8 +246,45 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [response, videoFFmpegCommandArgs.join(" ")];
     }
 
+    function getAudioTrackTitle(codec,channelLayout,language,currentTitle){
+        const isAtmosTrack = currentTitle.toLowerCase().includes("atmos");
+        const languageCode = language.toLowerCase().substring(0, 2)
+        const languageDictionary = new Map([
+            ['en', 'English'],
+            ['nl', 'Dutch'],
+            ['un', 'Unknown']
+        ]);
+
+        const codecDictionary = new Map([
+            ['aac:LC', 'AAC'],
+            ['ac3', 'Dolby Digital'],
+            ['eac3', 'Dolby Digital+'],
+            ['truehd', 'Dolby TrueHD'],
+            ['dts:DTS-HD MA', 'DTS-HD Master Audio'],
+            ['dts:DTS-HD', 'DTS-HD'],
+            ['dts:DTS', 'DTS'],
+            ['opus', 'Opus'],
+        ]);
+
+        let languageName = capitalizeFirstLetter(language);
+        if (languageDictionary.has(languageCode)){
+            languageName = languageDictionary.get(languageCode);
+        }
+
+        let codecName = capitalizeFirstLetter(codec);
+        if (codecDictionary.has(codec)){
+            codecName = codecDictionary.get(codec);
+        }
+
+        return `${languageName} - ${codecName}${isAtmosTrack ? " Atmos" : ""}${channelLayout ? ` ${channelLayout}` : ""}`;
+    }
+
 
     function cleanAudioStreams(inputs, response){
+        // Codec, Existing bitrate
+        const discardStreamIfHigherQualityFound = [
+            ["ac3",448000]
+        ]
         const toKeepAudioLanguages = inputs.to_keep_audio_languages.split(',');
         let audioFFmpegCommandArgs = [];
         let audioTracksOrder = [];
@@ -256,10 +293,23 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         allAudioStreams.forEach((currentStream, audioStreamsId) => {
             const currentStreamTitle = currentStream?.tags?.title?.toLowerCase() ?? "";
             const currentStreamLanguageTag = currentStream?.tags?.language?.toLowerCase() ?? "";
+            const currentStreamCodec = currentStream?.codec_name?.toLowerCase() ?? "";
+            const currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
+            const currentStreamIsCommentary = currentStream?.disposition?.comment ?? 0;
+            const currentStreamIsHearingImpaired = currentStream?.disposition?.hearing_impaired ?? 0;
+            const currentStreamIsVisualImpaired = currentStream?.disposition?.visual_impaired ?? 0;
 
-            const isCommentaryTrack = currentStreamTitle.includes('commentary') || currentStreamTitle.includes('description') || currentStreamTitle.includes('sdh');
+            const isCommentaryTrack = currentStreamTitle.includes('commentary') || currentStreamTitle.includes('description') || currentStreamTitle.includes('sdh') || currentStreamIsCommentary || currentStreamIsHearingImpaired || currentStreamIsVisualImpaired;
+            let higherQualityTrackFound = false;
+            if (discardStreamIfHigherQualityFound.some(discardStream => discardStream[0] === currentStreamCodec && discardStream[1] === currentStreamBitRate) && allAudioStreams.some(selectedAudioStream => {
+                const selectedStreamCodec = selectedAudioStream?.codec_name?.toLowerCase() ?? "";
+                const selectedStreamBitRate = selectedAudioStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
+                return selectedStreamCodec === currentStreamCodec && selectedStreamBitRate > currentStreamCodec;
+            })){
+                higherQualityTrackFound = true;
+            }
 
-            if (toKeepAudioLanguages.includes(currentStreamLanguageTag) && !isCommentaryTrack) {
+            if (toKeepAudioLanguages.includes(currentStreamLanguageTag) && !isCommentaryTrack && !higherQualityTrackFound) {
                 audioTracksOrder.push([audioStreamsId, currentStreamLanguageTag, true, isCommentaryTrack]);
             } else{
                 audioTracksOrder.push([audioStreamsId, currentStreamLanguageTag, false, isCommentaryTrack]);
@@ -267,6 +317,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     response.infoLog += `☒Audio stream 0:a:${audioStreamsId} detected as being descriptive, removing. \n`;
                 } else{
                     response.infoLog += `☒Audio stream 0:a:${audioStreamsId} has unwanted language tag ${currentStreamLanguageTag}, removing. \n`;
+                }
+                if (higherQualityTrackFound){
+                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} discard as a higher quality track is available, removing. \n`;
                 }
             }
         });
@@ -300,20 +353,22 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 audioFFmpegCommandArgs.push(`-map ${keepAudioStream ? "" : "-"}0:a:${audioStreamsId}  ${keepAudioStream ? `-disposition:a:${audioStreamsId} 0` : ""}`);
             }
 
-            const audioStreamTitle = allAudioStreams[audioStreamsId]?.tags?.title;
-            if (file.container === ".mkv" && audioStreamTitle && inputs.tag_title_for_audio === true){
-                if (currentStream.channels === 8) {
-                    audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="7.1"`);
-                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} detected as 8 channel with no title, tagging. \n`;
+
+            if (Boolean(inputs.tag_title_for_audio) === true){
+                const currentStream = allAudioStreams[audioStreamsId];
+                const currentStreamCodec = currentStream?.codec_name?.toLowerCase() ?? "";
+                const currentStreamProfile = currentStream?.profile ?? "";
+                const currentStreamChannelLayout = currentStream?.channel_layout;
+                const currentStreamTitle = currentStream?.tags?.title ?? "";
+                const currentStreamLanguage = currentStream?.tags?.language ?? "und";
+
+                let currentStreamCodecTag = currentStreamCodec;
+                if (currentStreamProfile){
+                    currentStreamCodecTag = `${currentStreamCodecTag}:${currentStreamProfile}`;
                 }
-                if (currentStream.channels === 6) {
-                    audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="5.1"`);
-                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} detected as 6 channel with no title, tagging. \n`;
-                }
-                if (currentStream.channels === 2) {
-                    audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="2.0"`);
-                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} detected as 2 channel with no title, tagging. \n`;
-                }
+
+                const audioStreamTitle = getAudioTrackTitle(currentStreamCodecTag,currentStreamChannelLayout,currentStreamLanguage,currentStreamTitle);
+                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}"`);
             }
         });
 
@@ -387,7 +442,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const newFileTitle = `${currentMediaTitle.replace("[Organized]","").trim()} [Organized]`;
     let ffmpegCommandArgs = [
-        `, -metadata title=\"${newFileTitle}\" -map 0:v`
+        `, -metadata title=\"${newFileTitle}\" -map_chapters -1 -map 0:v`
     ];
 
     response.container = getTargetContainerType(inputs, response);
