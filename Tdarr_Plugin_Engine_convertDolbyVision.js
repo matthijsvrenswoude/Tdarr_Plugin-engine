@@ -405,7 +405,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
     }
 
-    ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s`);
+    ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s?`);
     ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
     ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
     ffmpegCommandArgs.push("-strict unofficial");
