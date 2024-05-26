@@ -29,6 +29,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         FFmpegMode: false,
         reQueueAfter: false,
         infoLog: "",
+        mkvExtractLog: ""
     };
 
     function ifFileErrorExecuteReenqueue(file, response){
@@ -383,9 +384,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     if (mkvExtractCommandArgs.length > 1){
         let mkvExtractOutput = execSync(mkvExtractCommandArgs.join(" "));
-        response.info += "-------------------";
-        response.info += mkvExtractOutput;
-        response.info += "-------------------";
+        response.mkvExtractLog += "-------------------";
+        response.mkvExtractLog += mkvExtractOutput;
+        response.mkvExtractLog += "-------------------";
     }
 
     response.processFile = true;
