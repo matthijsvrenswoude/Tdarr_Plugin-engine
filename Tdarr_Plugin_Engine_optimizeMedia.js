@@ -385,7 +385,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 }
 
                 const audioStreamTitle = getAudioTrackTitle(currentStreamCodecTag,currentStreamChannelLayout,currentStreamLanguage,currentStreamTitle);
-                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title=${audioStreamTitle}`);
+                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}"`);
             }
         });
 
@@ -459,7 +459,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const newFileTitle = `${currentMediaTitle.replace("[Organized]","").trim()} [Organized]`;
     let ffmpegCommandArgs = [
-        `, -metadata title=${newFileTitle} -map_chapters -1 -map 0:v`
+        `, -metadata title="${newFileTitle}" -map_chapters -1 -map 0:v`
     ];
 
     response.container = getTargetContainerType(inputs, response);
