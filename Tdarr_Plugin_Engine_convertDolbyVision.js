@@ -76,12 +76,15 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const currentMediaFileDirectory = currentMediaFileDetails[0];
     const currentMediaFileName = currentMediaFileDetails[1];
 
-    const writeUnsupportedDV = (data) => fs.writeFileSync(`${currentMediaFileDirectory}/unsupported.DV`, JSON.stringify(data));
+    const writeUnsupportedDV = (data) => {
+        response.infoLog += `☒ Error: detected Dolby vision - Profile 7 multi layer \n`;
+        fs.writeFileSync(`${currentMediaFileDirectory}/unsupported.DV`, JSON.stringify(data));
+    }
 
     let currentMediaTitle = file?.meta?.Title?.toString() ?? file?.meta?.FileName ?? "";
     currentMediaTitle = cleanMediaTitle(currentMediaTitle);
 
-    function getFileDolbyVisionData(fileFFProbeData){
+    function getFileDolbyVisionData(fileFFProbeData, response){
         const allVideoStreams = fileFFProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "video");
         let dolbyVisionStreams = [];
         allVideoStreams.forEach((currentStream, videoStreamsId) => {
@@ -91,6 +94,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     const dolbyVisionLevel = sideData?.dv_level;
                     if (dolbyVisionProfile && dolbyVisionLevel){
                         if (dolbyVisionProfile == 5 || dolbyVisionProfile == 8 || dolbyVisionProfile == 7){
+                            response.infoLog += `Found: Dolby vision stream profile ${dolbyVisionProfile} \n`;
                             dolbyVisionStreams.push([videoStreamsId,currentStream,dolbyVisionProfile]);
                         } else{
                             writeUnsupportedDV(currentStream);
@@ -101,9 +105,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         });
         if (dolbyVisionStreams.filter(dolbyVisionStream => dolbyVisionStream[2] == 7).length > 1){
             writeUnsupportedDV("Error: Dolby vision - Profile 7 multi layer");
+            response.infoLog += `☒ Error: detected Dolby vision - Profile 7 multi layer \n`;
             dolbyVisionStreams = dolbyVisionStreams.filter(dolbyVisionStream => dolbyVisionStream[2] !== 7);
         }
-        return dolbyVisionStreams;
+        return [dolbyVisionStreams,response];
     }
 
     function capitalizeFirstLetter(string) {
@@ -279,12 +284,16 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 audioFFmpegMappingCommandArgs.push(`-map 0:a:${audioStreamsId}`);
                 audioFFmpegSettingsCommandArgs.push(`-disposition:a:${mappedAudioStreamId} default`);
                 audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
+                response.infoLog += `Copied audio stream 0:a:${audioStreamsId} as default \n`;
                 defaultAudioSet = true;
             } else{
                 if (keepAudioStream){
                     audioFFmpegMappingCommandArgs.push(`-map 0:a:${audioStreamsId}`);
                     audioFFmpegSettingsCommandArgs.push(`-disposition:a:${mappedAudioStreamId} 0`);
                     audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
+                    response.infoLog += `Copied audio stream 0:a:${audioStreamsId} \n`;
+                } else{
+                    response.infoLog += `Discarded audio stream 0:a:${audioStreamsId} \n`;
                 }
             }
 
@@ -324,6 +333,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                         newAudioStreamCodec = "aac";
                     }
                     audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${currentMappedStreamsCount} title="${audioStreamTitle}" -c:a:${currentMappedStreamsCount} ${newAudioStreamCodec} -b:a:${currentMappedStreamsCount} ${formattedNewAudioStreamBitrate} -ac:a:${currentMappedStreamsCount} ${newAudioStreamChannels}`);
+                    response.infoLog += `Created new ${audioStreamTitle} \n`;
                     currentMappedStreamsCount++;
                 }
             }
@@ -348,6 +358,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     }
                     mkvExtractCommandArgs.push(`${currentStreamGlobalStreamId}:"${outputFileDirectory}${newFileName}"`)
                     extractedFiles.push(newFileName);
+                    response.infoLog += `Extracting existing audio stream ${currentStreamCodecTag} 0:a:${availableAudioStream[5]} to separate file \n`;
                 }
             })
         });
@@ -360,9 +371,13 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const isCleanedCheckResponse = exitIfFileIsNotProcessable(file, response);
     if (isCleanedCheckResponse !== false) return isCleanedCheckResponse;
 
-    const dolbyVisionStreams = getFileDolbyVisionData(file.ffProbeData);
-    if (dolbyVisionStreams.length === 0) return response;
-
+    const dolbyVisionStreamsDetails = getFileDolbyVisionData(file.ffProbeData, response);
+    response = dolbyVisionStreamsDetails[1];
+    const dolbyVisionStreams = dolbyVisionStreamsDetails[0];
+    if (dolbyVisionStreams.length === 0){
+        response.infoLog += `No Dolby Vision streams found, Aborting.. \n`;
+        return response;
+    }
 
     let ffmpegCommandArgs = [`,`];
     let mkvExtractCommandArgs = [
@@ -373,8 +388,11 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     response = reworkedAudioResults[0];
     const audioFFmpegMappingCommandArgs = reworkedAudioResults[1][1];
     const audioFFmpegSettingsCommandArgs = reworkedAudioResults[1][2];
+    const audioMkvExtractCommandArgs = reworkedAudioResults[1][0];
 
-    mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
+    if (audioMkvExtractCommandArgs){
+        mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
+    }
 
     ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s`);
     ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
