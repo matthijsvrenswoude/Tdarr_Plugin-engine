@@ -202,7 +202,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
         // Codec, Minimum bitrate, Minimum channels
         const passTroughCodecs = [
-            ["eac3",1024000,6],
+            ["eac3",448000,6],
             ["opus",0,6]
         ];
 
