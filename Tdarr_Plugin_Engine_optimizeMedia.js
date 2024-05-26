@@ -143,7 +143,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     function exitIfFileIsAlreadyCleaned(inputs, mediaTitle, response){
-        console.log(inputs.temporary_force_clean,mediaTitle,mediaTitle.includes("[Organized]"));
         if (inputs.temporary_force_clean){
             return false;
         }
@@ -180,8 +179,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         if (metaTitleTag.trim().length > 0){
             mediaTitle = metaTitleTag;
         }
-        if (mp4TitleTag.trim().length === 0){
-            mediaTitle = metaTitleTag;
+        if (mp4TitleTag.trim().length > 0){
+            mediaTitle = mp4TitleTag;
         }
         return mediaTitle;
     }
@@ -458,7 +457,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     let currentMediaTitle = getMediaTitle(file);
-    console.log(currentMediaTitle);
+
     const isFileErroredResponse = ifFileErrorExecuteReenqueue(file, response);
     if (isFileErroredResponse !== false) return isFileErroredResponse;
 

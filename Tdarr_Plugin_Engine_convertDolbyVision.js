@@ -62,8 +62,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         if (metaTitleTag.trim().length > 0){
             mediaTitle = metaTitleTag;
         }
-        if (mp4TitleTag.trim().length === 0){
-            mediaTitle = metaTitleTag;
+        if (mp4TitleTag.trim().length > 0){
+            mediaTitle = mp4TitleTag;
         }
         return mediaTitle;
     }
