@@ -385,7 +385,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 }
 
                 const audioStreamTitle = getAudioTrackTitle(currentStreamCodecTag,currentStreamChannelLayout,currentStreamLanguage,currentStreamTitle);
-                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}"`);
+                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title=${audioStreamTitle}`);
             }
         });
 
@@ -459,7 +459,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const newFileTitle = `${currentMediaTitle.replace("[Organized]","").trim()} [Organized]`;
     let ffmpegCommandArgs = [
-        `, -metadata title=\"${newFileTitle}\" -map_chapters -1 -map 0:v`
+        `, -metadata title=${newFileTitle} -map_chapters -1 -map 0:v`
     ];
 
     response.container = getTargetContainerType(inputs, response);
@@ -485,7 +485,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         ffmpegCommandArgs.push("-strict unofficial");
     }
 
-    if (specialVideoStreamsResults[1].filter(stream => stream[2] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
+    if (specialVideoStreamsResults[1].filter(stream => stream[2][0] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
         response.infoLog += `☒ File says it supports Dolby Vision, However no DoVi Metadata could be found. \n`;
     }
 

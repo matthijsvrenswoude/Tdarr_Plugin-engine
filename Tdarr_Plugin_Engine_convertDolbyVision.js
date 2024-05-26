@@ -277,13 +277,13 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             if (!defaultAudioSet && keepAudioStream){
                 audioFFmpegMappingCommandArgs.push(`-map 0:a:${audioStreamsId}`);
                 audioFFmpegSettingsCommandArgs.push(`-disposition:a:${mappedAudioStreamId} default`);
-                audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
+                audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title=${audioStreamTitle} -c:a:${mappedAudioStreamId} copy`);
                 defaultAudioSet = true;
             } else{
                 if (keepAudioStream){
                     audioFFmpegMappingCommandArgs.push(`-map 0:a:${audioStreamsId}`);
                     audioFFmpegSettingsCommandArgs.push(`-disposition:a:${mappedAudioStreamId} 0`);
-                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title="${audioStreamTitle}" -c:a:${mappedAudioStreamId} copy`);
+                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${mappedAudioStreamId} title=${audioStreamTitle} -c:a:${mappedAudioStreamId} copy`);
                 }
             }
 
@@ -322,7 +322,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     if (newAudioStreamCodec === "aac:LC"){
                         newAudioStreamCodec = "aac";
                     }
-                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${currentMappedStreamsCount} title="${audioStreamTitle}" -c:a:${currentMappedStreamsCount} ${newAudioStreamCodec} -b:a:${currentMappedStreamsCount} ${formattedNewAudioStreamBitrate} -ac:a:${currentMappedStreamsCount} ${newAudioStreamChannels}`);
+                    audioFFmpegSettingsCommandArgs.push(`-metadata:s:a:${currentMappedStreamsCount} title=${audioStreamTitle} -c:a:${currentMappedStreamsCount} ${newAudioStreamCodec} -b:a:${currentMappedStreamsCount} ${formattedNewAudioStreamBitrate} -ac:a:${currentMappedStreamsCount} ${newAudioStreamChannels}`);
                     currentMappedStreamsCount++;
                 }
             }
@@ -377,7 +377,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s`);
     ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
-    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
+    ffmpegCommandArgs.push(`-metadata title=${currentMediaTitle} -c:v copy -c:s mov_text`);
     ffmpegCommandArgs.push("-strict unofficial");
 
 
