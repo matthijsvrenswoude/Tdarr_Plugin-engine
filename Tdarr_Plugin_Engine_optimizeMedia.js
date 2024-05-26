@@ -246,6 +246,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [response, videoFFmpegCommandArgs.join(" ")];
     }
 
+    function capitalizeFirstLetter(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+
     function getAudioTrackTitle(codec,channelLayout,language,currentTitle){
         const isAtmosTrack = currentTitle.toLowerCase().includes("atmos");
         const languageCode = language.toLowerCase().substring(0, 2)
