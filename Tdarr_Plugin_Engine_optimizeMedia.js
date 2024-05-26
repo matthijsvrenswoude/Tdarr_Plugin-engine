@@ -321,7 +321,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             if (discardStreamIfHigherQualityFound.some(discardStream => discardStream[0] === currentStreamCodec && discardStream[1] === currentStreamBitRate) && allAudioStreams.some(selectedAudioStream => {
                 const selectedStreamCodec = selectedAudioStream?.codec_name?.toLowerCase() ?? "";
                 const selectedStreamBitRate = selectedAudioStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
-                return selectedStreamCodec === currentStreamCodec && selectedStreamBitRate > currentStreamCodec;
+                return selectedStreamCodec === currentStreamCodec && selectedStreamBitRate > currentStreamBitRate;
             })){
                 higherQualityTrackFound = true;
             }
@@ -459,7 +459,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     const newFileTitle = `${currentMediaTitle.replace("[Organized]","").trim()} [Organized]`;
     let ffmpegCommandArgs = [
-        `, -metadata title="${newFileTitle}" -map_chapters -1 -map 0:v`
+        `, -metadata title=\"${newFileTitle}\" -map_chapters -1 -map 0:v`
     ];
 
     response.container = getTargetContainerType(inputs, response);

@@ -69,7 +69,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [filePath, fileName];
     }
 
-    const currentMediaFilePath = file.file;
+    const currentMediaFilePath = otherArguments.originalLibraryFile.file;
 
     const currentMediaFileDetails = getFileDetails(currentMediaFilePath);
     const currentMediaFileDirectory = currentMediaFileDetails[0];
@@ -377,7 +377,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s`);
     ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
-    ffmpegCommandArgs.push(`-metadata title="${currentMediaTitle}" -c:v copy -c:s mov_text`);
+    ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
     ffmpegCommandArgs.push("-strict unofficial");
 
 
