@@ -318,9 +318,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
             const isCommentaryTrack = currentStreamTitle.includes('commentary') || currentStreamTitle.includes('description') || currentStreamTitle.includes('sdh') || currentStreamIsCommentary || currentStreamIsHearingImpaired || currentStreamIsVisualImpaired;
             let higherQualityTrackFound = false;
+
             if (discardStreamIfHigherQualityFound.some(discardStream => discardStream[0] === currentStreamCodec && discardStream[1] === currentStreamBitRate) && allAudioStreams.some(selectedAudioStream => {
                 const selectedStreamCodec = selectedAudioStream?.codec_name?.toLowerCase() ?? "";
-                const selectedStreamBitRate = selectedAudioStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
+                const selectedStreamBitRate = selectedAudioStream?.bit_rate ? Number(selectedAudioStream?.bit_rate) :  0;
                 return selectedStreamCodec === currentStreamCodec && selectedStreamBitRate > currentStreamBitRate;
             })){
                 higherQualityTrackFound = true;
