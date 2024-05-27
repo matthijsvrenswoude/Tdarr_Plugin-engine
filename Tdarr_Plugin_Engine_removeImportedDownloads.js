@@ -8,7 +8,7 @@ const details = () => {
         Type: "any",
         Operation: "Transcode",
         Version: "1.00",
-        Tags: "pre-processing,audio only,ffmpeg,configurable",
+        Tags: "plugin-state-stable,pre-processing,audio only,ffmpeg,configurable",
         Inputs: [
             {
                 name: 'blocked_video_tags',

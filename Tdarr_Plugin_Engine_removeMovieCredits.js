@@ -8,7 +8,7 @@ const details = () => {
         Type: "any",
         Operation: "Transcode",
         Version: "1.00",
-        Tags: "post-processing,audio only,ffmpeg,configurable",
+        Tags: "plugin-state-wip,post-processing,audio only,ffmpeg,configurable",
         Inputs: [
         ],
     };

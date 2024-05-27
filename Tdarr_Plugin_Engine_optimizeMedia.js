@@ -7,7 +7,7 @@ const details = () => {
         Type: "any",
         Operation: "Transcode",
         Version: "1.00",
-        Tags: "pre-processing,ffmpeg,configurable",
+        Tags: "plugin-state-stable,pre-processing,ffmpeg,configurable",
         Inputs: [
             {
                 name: 'target_container_type',

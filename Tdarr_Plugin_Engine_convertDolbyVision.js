@@ -2,11 +2,11 @@ const details = () => {
     return {
         id: "Tdarr_Plugin_Engine_convertDolbyVision",
         Stage: "Pre-processing",
-        Name: "WIP",
+        Name: "Convert Dolby Vision MKVs to MP4 for playback on LG TVs",
         Type: "any",
         Operation: "Transcode",
         Version: "1.00",
-        Tags: "pre-processing,ffmpeg,configurable",
+        Tags: "plugin-state-beta,post-processing,ffmpeg,MP4Box,MkvExtract,DoviTool",
         Inputs: [
         ],
     };
@@ -14,7 +14,6 @@ const details = () => {
 
 const plugin = (file, librarySettings, inputs, otherArguments) => {
     const lib = require('../methods/lib')();
-    const fs = require('fs')
     const { execSync } = require('child_process');
     inputs = lib.loadDefaultValues(inputs, details);
 
@@ -417,7 +416,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     let ffmpegCommandArgs = [`,`];
     if (reEncodedDolbyVisionVideo){
-        ffmpegCommandArgs.push(`-i "${cacheFileDirectory}${reEncodedDolbyVisionVideo} -map 1:v"`);
+        ffmpegCommandArgs.push(`-i ${cacheFileDirectory}${reEncodedDolbyVisionVideo} -map 1:v`);
     } else{
         ffmpegCommandArgs.push("-map 0:v");
     }
