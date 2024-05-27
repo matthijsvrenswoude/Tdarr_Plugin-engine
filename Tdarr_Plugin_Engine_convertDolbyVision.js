@@ -86,7 +86,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [filePath, fileName];
     }
 
-    const cacheFileDirectory = getFileDetails(otherArguments.cacheFilePath)[0];
+    const cacheFileDirectory = getFileDetails(otherArguments.cacheFilePath)[0].replaceAll("\\","/");
     const currentMediaFilePath = otherArguments.originalLibraryFile.file;
 
     const currentMediaFileDetails = getFileDetails(currentMediaFilePath);
@@ -99,8 +99,20 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     function convertDualLayerDolbyVision(){
         const reEncodedDolbyVisionFileName = "reencoded-dolby-vision-layer.mp4";
         const dolbyVisionExtractionFile = `${cacheFileDirectory}raw-dolby-vision.hevc`;
-        response.conversionLog += execSync(`"${ffMpegPath}" -i "${file.file}" -dn -c:v copy -bsf hevc_mp4toannexb -f hevc - | "${doviToolPath}" -m 2 convert --discard - -o "${dolbyVisionExtractionFile}"`);
-        response.conversionLog += execSync(`"${mp4BoxPath}" -add "${dolbyVisionExtractionFile}":dvp=8.1:xps_inband:hdr=none -brand mp42isom -ab dby1 -no-iod -enable 1 "${reEncodedDolbyVisionFileName}" -tmp "${cacheFileDirectory}"`);
+        const extractionCommand = `"${ffMpegPath}" -i "${file.file}" -dn -c:v copy -bsf hevc_mp4toannexb -f hevc - | "${doviToolPath}" -m 2 convert --discard - -o "${dolbyVisionExtractionFile}"`;
+        const reEncodeCommand = `"${mp4BoxPath}" -add "${dolbyVisionExtractionFile}":dvp=8.1:xps_inband:hdr=none -brand mp42isom -ab dby1 -no-iod -enable 1 "${cacheFileDirectory}${reEncodedDolbyVisionFileName}" -tmp "${cacheFileDirectory}"`;
+        const addDividerLine = () => {
+            response.conversionLog += "-------------------";
+        };
+        addDividerLine();
+        response.conversionLog += `Initiating extraction with command: ${extractionCommand}`;
+        addDividerLine();
+        response.conversionLog += execSync(extractionCommand);
+        addDividerLine();
+        response.conversionLog += `Initiating re-encoding with command: ${reEncodeCommand}`;
+        addDividerLine();
+        response.conversionLog += execSync(reEncodeCommand);
+        addDividerLine();
         return reEncodedDolbyVisionFileName;
     }
 
@@ -424,7 +436,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
     ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
     ffmpegCommandArgs.push("-strict unofficial");
-
 
     if (audioMkvExtractCommandArgs){
         mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
