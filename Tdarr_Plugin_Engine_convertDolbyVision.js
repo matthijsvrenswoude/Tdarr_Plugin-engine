@@ -1,6 +1,3 @@
-
-
-
 const details = () => {
     return {
         id: "Tdarr_Plugin_Engine_convertDolbyVision",
@@ -21,7 +18,11 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const { execSync } = require('child_process');
     inputs = lib.loadDefaultValues(inputs, details);
 
+    const ffMpegPath = otherArguments.ffmpegPath;
     const mkvExtractPath = otherArguments.mkvpropeditPath?.replace("mkvpropedit","mkvextract");
+    const doviToolPath = "C:/Tdarr/DoviTool/dovi_tool.exe";
+    const mp4BoxPath = "C:/Program Files/GPAC/mp4box.exe";
+
     let response = {
         processFile: false,
         preset: "",
@@ -30,7 +31,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         FFmpegMode: false,
         reQueueAfter: false,
         infoLog: "",
-        mkvExtractLog: ""
+        mkvExtractLog: "",
+        conversionLog: ""
     };
 
     function ifFileErrorExecuteReenqueue(file, response){
@@ -84,42 +86,46 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [filePath, fileName];
     }
 
+    const cacheFileDirectory = getFileDetails(otherArguments.cacheFilePath)[0];
     const currentMediaFilePath = otherArguments.originalLibraryFile.file;
 
     const currentMediaFileDetails = getFileDetails(currentMediaFilePath);
     const currentMediaFileDirectory = currentMediaFileDetails[0];
     const currentMediaFileName = currentMediaFileDetails[1];
 
-    const writeUnsupportedDV = (data) => {
-        response.infoLog += `☒ Error: detected Dolby vision - Profile 7 multi layer \n`;
-        fs.writeFileSync(`${currentMediaFileDirectory}/unsupported.DV`, JSON.stringify(data));
-    }
-
     let currentMediaTitle = getMediaTitle(file);
     currentMediaTitle = cleanMediaTitle(currentMediaTitle);
+
+    function convertDualLayerDolbyVision(){
+        const reEncodedDolbyVisionFileName = "reencoded-dolby-vision-layer.mp4";
+        const dolbyVisionExtractionFile = `${cacheFileDirectory}raw-dolby-vision.hevc`;
+        response.conversionLog += execSync(`"${ffMpegPath}" -i "${file.file}" -dn -c:v copy -bsf hevc_mp4toannexb -f hevc - | "${doviToolPath}" -m 2 convert --discard - -o "${dolbyVisionExtractionFile}"`);
+        response.conversionLog += execSync(`"${mp4BoxPath}" -add "${dolbyVisionExtractionFile}":dvp=8.1:xps_inband:hdr=none -brand mp42isom -ab dby1 -no-iod -enable 1 "${reEncodedDolbyVisionFileName}" -tmp "${cacheFileDirectory}"`);
+        return reEncodedDolbyVisionFileName;
+    }
 
     function getFileDolbyVisionData(fileFFProbeData, response){
         const allVideoStreams = fileFFProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "video");
         let dolbyVisionStreams = [];
+        let unsupportedDolbyVisionDetected = false;
         allVideoStreams.forEach((currentStream, videoStreamsId) => {
             if (currentStream.side_data_list && Array.isArray(currentStream.side_data_list)){
                 currentStream.side_data_list.forEach(sideData => {
                     const dolbyVisionProfile = sideData?.dv_profile;
                     if (dolbyVisionProfile){
-                        if (dolbyVisionProfile == 5 || dolbyVisionProfile == 8 || dolbyVisionProfile == 7){
+                        if (dolbyVisionProfile === 5 || dolbyVisionProfile === 8 || dolbyVisionProfile === 7){
                             response.infoLog += `Found: Dolby vision stream profile ${dolbyVisionProfile} \n`;
                             dolbyVisionStreams.push([videoStreamsId,currentStream,dolbyVisionProfile]);
                         } else{
-                            writeUnsupportedDV(currentStream);
+                            unsupportedDolbyVisionDetected = true;
                         }
                     }
                 });
             }
         });
-        if (dolbyVisionStreams.filter(dolbyVisionStream => dolbyVisionStream[2] == 7).length > 1){
-            writeUnsupportedDV("Error: Dolby vision - Profile 7 multi layer");
-            response.infoLog += `☒ Error: detected Dolby vision - Profile 7 multi layer \n`;
-            dolbyVisionStreams = dolbyVisionStreams.filter(dolbyVisionStream => dolbyVisionStream[2] !== 7);
+        if (unsupportedDolbyVisionDetected){
+            response.infoLog += `Unsupported dolby vision profile found: ${dolbyVisionStreams[0][2]}, Aborting.. \n`;
+            dolbyVisionStreams = [];
         }
         return [dolbyVisionStreams,response];
     }
@@ -391,8 +397,19 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         response.infoLog += `No Dolby Vision streams found, Aborting.. \n`;
         return response;
     }
+    let reEncodedDolbyVisionVideo = "";
+    if (dolbyVisionStreams.find(dolbyVisionStream => dolbyVisionStream[2] === 7)){
+        response.infoLog += `Detected Dolby vision profile 7, Starting conversion process... (This may take a while)\n`;
+        reEncodedDolbyVisionVideo = convertDualLayerDolbyVision();
+    }
 
     let ffmpegCommandArgs = [`,`];
+    if (reEncodedDolbyVisionVideo){
+        ffmpegCommandArgs.push(`-i "${cacheFileDirectory}${reEncodedDolbyVisionVideo} -map 1:v"`);
+    } else{
+        ffmpegCommandArgs.push("-map 0:v");
+    }
+
     let mkvExtractCommandArgs = [
         `${mkvExtractPath} tracks "${currentMediaFileDirectory}${currentMediaFileName}"`
     ];
@@ -403,16 +420,15 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const audioFFmpegSettingsCommandArgs = reworkedAudioResults[1][2];
     const audioMkvExtractCommandArgs = reworkedAudioResults[1][0];
 
-    if (audioMkvExtractCommandArgs){
-        mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
-    }
-
-    ffmpegCommandArgs.push(`-map 0:v ${audioFFmpegMappingCommandArgs} -map 0:s?`);
+    ffmpegCommandArgs.push(`${audioFFmpegMappingCommandArgs} -map 0:s?`);
     ffmpegCommandArgs.push(audioFFmpegSettingsCommandArgs);
     ffmpegCommandArgs.push(`-metadata title=\"${currentMediaTitle}\" -c:v copy -c:s mov_text`);
     ffmpegCommandArgs.push("-strict unofficial");
 
 
+    if (audioMkvExtractCommandArgs){
+        mkvExtractCommandArgs.push(reworkedAudioResults[1][0]);
+    }
     if (mkvExtractCommandArgs.length > 1){
         let mkvExtractOutput = execSync(mkvExtractCommandArgs.join(" "));
         response.mkvExtractLog += "-------------------";
