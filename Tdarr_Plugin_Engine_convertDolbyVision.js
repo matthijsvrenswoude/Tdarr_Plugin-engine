@@ -348,7 +348,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 let newAudioStreamCodec = targetCodec[0];
                 const newAudioStreamBitrate = targetCodec[1];
                 let newAudioStreamChannels = targetCodec[2];
-                let newAudioStreamChannelLayout = bestAudioStreamChannelLayout;
+                let newAudioStreamChannelLayout = targetCodec[2];
 
                 if (bestAudioStreamBitrate > newAudioStreamBitrate){
                     if (bestAudioStreamChannels < newAudioStreamChannels){
