@@ -113,11 +113,136 @@ const details = () => {
     };
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+class Muxing {
+    static actionsEnum = Object.freeze({
+        EXTRACT:   Symbol("extract"),
+        COPY:  Symbol("copy"),
+        COPYDOVI:  Symbol("copydovi"),
+        DISCARD: Symbol("discard")
+    });
+    static formatAction = (globalStreamId,type,typeStreamId,currentStreamCodec,currentStreamLanguage,currentStreamBitRate,title,defaultStream,formats) => {
+        return new Map([
+            ['globalStreamId', globalStreamId],
+            ['type', type],
+            ['typeStreamId', typeStreamId],
+            ['codec', currentStreamCodec],
+            ['bitrate', currentStreamBitRate],
+            ['language', currentStreamLanguage],
+            ['title',title],
+            ['default', defaultStream],
+            ['formats', formats]
+        ]);
+    }
+}
+
+class MKVExtractExtractor {
+    programPath = "";
+    constructor(programPath) {
+        this.programPath = programPath;
+    }
+}
+
+class MP4BoxExtractor {
+    programPath = "";
+    constructor(programPath) {
+        this.programPath = programPath;
+    }
+}
+
+class FFMpegTranscoder{
+    programPath = "";
+    constructor(programPath){
+        this.programPath = programPath;
+    }
+}
+
+function createCompatibleCodecItem(codec,maxBitrate,maxChannels) {
+    return new Map([
+        ['codec',codec],
+        ['maxBitrate', maxBitrate],
+        ['maxChannels',maxChannels],
+    ]);
+}
+
+class FFMpegPresetGenerator {
+    programPath = "";
+    extractorInterface = null;
+    transcoderInterface = null;
+    doviMuxerInterface = null;
+
+    compatibleCodecs = [
+        createCompatibleCodecItem("truehd",18000000,32),
+        createCompatibleCodecItem("eac3",1664000,8),
+        createCompatibleCodecItem("ac3",640000,6),
+        createCompatibleCodecItem("aac:LC",256000,2),
+    ];
+
+    // Codec, Minimum channels, File extension
+    const extractCodecs = [
+        ["dts:DTS-HD MA",6,"dts"],
+        ["truehd",0,"thd"]
+    ];
+
+
+
+    constructor(programPath,extractorInterface,transcoderInterface,doviMuxerInterface) {
+        this.programPath = programPath;
+        this.extractorInterface = extractorInterface;
+        this.transcoderInterface = transcoderInterface;
+        this.doviMuxerInterface = doviMuxerInterface;
+    }
+
+    loadActions(actions){
+
+    };
+
+    generatePresets(){
+
+    }
+}
+
+class MP4BoxPresetGenerator {
+    programPath = "";
+    extractorInterface = null;
+    transcoderInterface = null;
+    doviMuxerInterface = null;
+
+    constructor(programPath,extractorInterface,transcoderInterface,doviMuxerInterface) {
+        this.programPath = programPath;
+        this.extractorInterface = extractorInterface;
+        this.transcoderInterface = transcoderInterface;
+        this.doviMuxerInterface = doviMuxerInterface;
+    }
+}
+
+class DoViToolsMuxer {
+    programPath = "";
+    constructor(programPath) {
+        this.programPath = programPath;
+    }
+}
+
 const plugin = (file, librarySettings, inputs, otherArguments) => {
     const lib = require('../methods/lib')();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars,no-param-reassign
     inputs = lib.loadDefaultValues(inputs, details);
+
+    inputs.targetCodec = [
+        ["ac3",640000,6],
+        ["aac:LC",256000,2]
+    ];
+
+
+    inputs.preferedCodecLimits =         createCompatibleCodecItem("truehd",18000000,32),
+        createCompatibleCodecItem("eac3",1664000,8),
+        createCompatibleCodecItem("ac3",640000,6),
+        createCompatibleCodecItem("aac:LC",256000,2),
+
+    const allStreams = file.ffProbeData.streams;
+
+    const ffMpegPath = otherArguments.ffmpegPath;
+    const mkvExtractPath = otherArguments.mkvpropeditPath?.replace("mkvpropedit","mkvextract");
+    const doviToolPath = "C:/Tdarr/DoviTool/dovi_tool.exe";
+    const mp4BoxPath = "C:/Program Files/GPAC/mp4box.exe";
 
     let response = {
         processFile: false,
@@ -128,6 +253,37 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         reQueueAfter: false,
         infoLog: "",
     };
+
+    const currentContainerType = file.container.toLowerCase();
+    const targetContainerType = getTargetContainerType();
+
+    let videoExtractorInterface = null;
+    let videoTranscoderInterface = new FFMpegTranscoder();
+    let videoDoViMuxerInterface = new DoViToolsMuxer(doviToolPath);
+    let videoGeneratorInterface = null;
+    switch (`${currentContainerType}${targetContainerType}`){
+        case ".mkv.mkv":
+            videoExtractorInterface = new MKVExtractExtractor(mkvExtractPath);
+            videoGeneratorInterface = new FFMpegPresetGenerator(ffMpegPath,videoExtractorInterface, videoTranscoderInterface, videoDoViMuxerInterface)
+            break;
+        case ".mkv.mp4":
+            videoExtractorInterface = new MKVExtractExtractor(mkvExtractPath);
+            videoGeneratorInterface = new MP4BoxPresetGenerator(mp4BoxPath,videoExtractorInterface, videoTranscoderInterface, videoDoViMuxerInterface);
+            break;
+        case ".mp4.mp4":
+            videoExtractorInterface = new MP4BoxExtractor(mp4BoxPath);
+            videoGeneratorInterface = new MP4BoxPresetGenerator(mp4BoxPath,videoExtractorInterface, videoTranscoderInterface, videoDoViMuxerInterface);
+            break;
+        case ".mp4.mkv":
+            videoExtractorInterface = new MP4BoxExtractor(mp4BoxPath);
+            videoGeneratorInterface = new FFMpegPresetGenerator(ffMpegPath,videoExtractorInterface, videoTranscoderInterface, videoDoViMuxerInterface);
+            break;
+        default:
+            break;
+    }
+
+
+
 
     function ifFileErrorExecuteReenqueue(file, response){
         const mediaInfoRead = file?.scannerReads?.mediaInfoRead ?? "";
@@ -185,6 +341,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return mediaTitle;
     }
 
+    function capitalizeFirstLetter(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+
     function cleanMediaTitle(currentMediaTitle){
         return currentMediaTitle
             .replaceAll('"',"")
@@ -204,63 +364,88 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return response.container;
     }
 
-    function getHasSpecialVideoFormats(fileFFProbeData, response){
-        const allVideoStreams = fileFFProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "video");
-        const specialVideoFormatStreams = [];
-        allVideoStreams.forEach((currentStream, videoStreamsId) => {
-            if (currentStream.side_data_list && Array.isArray(currentStream.side_data_list)){
-                currentStream.side_data_list.forEach(sideData => {
-                    let sideDataType = sideData.side_data_type ?? "";
-                    const dolbyVisionProfile = sideData.dv_profile ?? 0;
-                    const dolbyVisionLevel = sideData.dv_level ?? 0;
-                    if (dolbyVisionProfile && dolbyVisionLevel){
-                        sideDataType = "DOVI configuration record"
-                    }
-                    switch (sideDataType){
-                        case "DOVI configuration record":
-                            specialVideoFormatStreams.push([videoStreamsId,currentStream,["Dolby Vision",dolbyVisionProfile]]);
-                            response.infoLog += `☒Video stream 0:v:${videoStreamsId} detected as having ${sideDataType} ${dolbyVisionProfile} \n`;
-                            break;
-                        case "Dolby Vision Metadata":
-                            specialVideoFormatStreams.push([videoStreamsId,currentStream,["Dolby Vision","Per-Frame"]]);
-                            response.infoLog += `☒Video stream 0:v:${videoStreamsId} detected as having ${sideDataType} Per-Frame \n`;
-                            break;
-                        case "Content Light Level Metadata":
-                        case "Mastering Display Metadata":
-                            specialVideoFormatStreams.push([videoStreamsId,currentStream,["HDR10"]]);
-                            response.infoLog += `☒Video stream 0:v:${videoStreamsId} detected as having ${sideDataType} \n`;
-                            break;
-                        case "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)":
-                            specialVideoFormatStreams.push([videoStreamsId,currentStream,["HDR10+"]]);
-                            response.infoLog += `☒Video stream 0:v:${videoStreamsId} detected as having ${sideDataType} \n`;
-                            break;
-                        default:
-                            break;
-                    }
-                })
-            }
-        });
-        return [response, specialVideoFormatStreams];
+    function parseCodecToFileExtension(codecName){
+        const codecDictionary = new Map([
+            ['hevc','hevc'],
+            ['aac:LC', 'aac'],
+            ['ac3', 'ac3'],
+            ['eac3', 'eac3'],
+            ['truehd', 'thd'],
+            ['dts:DTS-HD MA', 'dts'],
+            ['dts:DTS-HD', 'dts'],
+            ['dts:DTS', 'dts'],
+            ['opus', 'opus'],
+        ]);
+
+        return codecDictionary.get(codecName) ?? ""
     }
 
-    function cleanVideoStreams(inputs, response){
-        const allVideoStreams = file.ffProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "video");
-        const toRemoveVideoCodecs = inputs.to_remove_video_codecs.split(',');
-        let videoFFmpegCommandArgs = [];
+    function getStreamSpecialVideoFormats(videoStreamId,currentStream){
+        const currentStreamVideoFormats = [];
+        if (currentStream.side_data_list && Array.isArray(currentStream.side_data_list)) {
+            currentStream.side_data_list.forEach(sideData => {
+                let sideDataType = sideData.side_data_type ?? "";
+                const dolbyVisionProfile = sideData.dv_profile ?? 0;
+                const dolbyVisionLevel = sideData.dv_level ?? 0;
+                if (dolbyVisionProfile && dolbyVisionLevel) {
+                    sideDataType = "DOVI configuration record"
+                }
+                switch (sideDataType) {
+                    case "DOVI configuration record":
+                        currentStreamVideoFormats.push(["Dolby Vision", dolbyVisionProfile,dolbyVisionLevel]);
+                        response.infoLog += `☒Video stream 0:v:${videoStreamId} detected as having ${sideDataType} ${dolbyVisionProfile} \n`;
+                        break;
+                    case "Dolby Vision Metadata":
+                        currentStreamVideoFormats.push(["Dolby Vision", "Per-Frame"]);
+                        response.infoLog += `☒Video stream 0:v:${videoStreamId} detected as having ${sideDataType} Per-Frame \n`;
+                        break;
+                    case "Content Light Level Metadata":
+                    case "Mastering Display Metadata":
+                        currentStreamVideoFormats.push(["HDR10"]);
+                        response.infoLog += `☒Video stream 0:v:${videoStreamId} detected as having ${sideDataType} \n`;
+                        break;
+                    case "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)":
+                        currentStreamVideoFormats.push(["HDR10+"]);
+                        response.infoLog += `☒Video stream 0:v:${videoStreamId} detected as having ${sideDataType} \n`;
+                        break;
+                    default:
+                        break;
+                }
+            })
+        }
+        return currentStreamVideoFormats;
+    }
 
-        allVideoStreams.forEach((currentStream, videoStreamsId) => {
+    function generateVideoStreamActions(inputs){
+        const toRemoveVideoCodecs = inputs.to_remove_video_codecs.split(',');
+        let videoActions = [];
+        let videoStreamsId = 0;
+        allStreams.forEach((currentStream, globalStreamId) => {
+            currentStream.filter(stream => stream.codec_type.toLowerCase() === "video"); return;
             const currentStreamCodec = currentStream?.codec_name?.toLowerCase() ?? "";
-            if (toRemoveVideoCodecs.includes(currentStreamCodec)) {
-                videoFFmpegCommandArgs.push(`-map -0:v:${videoStreamsId}`);
+            const currentStreamLanguage = currentStream?.tags?.language?.toLowerCase() ?? "";
+            const currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
+            const currentStreamTitle = currentStream?.tags?.title?.toLowerCase() ?? "";
+            const removeCurrentStream = toRemoveVideoCodecs.includes(currentStreamCodec);
+            if (removeCurrentStream) {
                 response.infoLog += `☒Video stream 0:v:${videoStreamsId} detected as being ${currentStreamCodec}, removing. \n`;
             }
+            const currentStreamSpecialFormats = getStreamSpecialVideoFormats(videoStreamsId,currentStream);
+            const isCurrentStreamDoVi = currentStreamSpecialFormats.some(format => format[0] === "Dolby Vision");
+            videoActions.push([removeCurrentStream ? Muxing.actionsEnum.DISCARD : (isCurrentStreamDoVi? Muxing.actionsEnum.COPYDOVI : Muxing.actionsEnum.COPY),
+                Muxing.formatAction(
+                    globalStreamId,
+                    'v',
+                    videoStreamsId,
+                    currentStreamCodec,
+                    currentStreamLanguage,
+                    currentStreamBitRate,
+                    currentStreamTitle,
+                    videoStreamsId === 0,
+                    currentStreamSpecialFormats)]);
+            videoStreamsId++;
         });
-
-        return [response, videoFFmpegCommandArgs.join(" ")];
-    }
-
-    function capitalizeFirstLetter(string) {
-        return string.charAt(0).toUpperCase() + string.slice(1);
+        return videoActions;
     }
 
     function parseChannelsToChannelLayout(channels){
@@ -273,11 +458,12 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return "";
     }
 
-    function getAudioTrackTitle(codec,channelLayout,language){
+    function generateAudioTrackTitle(codec,channelLayout,language,originalTitle){
         if (Number.isInteger(channelLayout)){
             channelLayout = parseChannelsToChannelLayout(channelLayout);
         }
 
+        const IsAtmosTrack = originalTitle.toLowerCase().includes("atmos");
         const languageCode = language.toLowerCase().substring(0, 2)
         const languageDictionary = new Map([
             ['en', 'English'],
@@ -306,102 +492,118 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             codecName = codecDictionary.get(codec);
         }
 
-        return `${languageName} - ${codecName}${channelLayout ? ` ${channelLayout}` : ""}`;
+        return `${languageName} - ${codecName}${IsAtmosTrack? " Atmos" : ""}${channelLayout ? ` ${channelLayout}` : ""}`;
     }
 
 
-    function cleanAudioStreams(inputs, response){
+    function generateAudioStreamActions(inputs){
+        const codecQualityOrder = [
+            "dts:DTS-HD MA",
+            "truehd",
+            "dts:DTS-HD",
+            "eac3",
+            "dts:DTS",
+            "opus",
+            "ac3",
+            "aac:LC"
+        ];
+
         // Codec, Existing bitrate
         const discardStreamIfHigherQualityFound = [
             ["ac3",448000]
         ]
         const toKeepAudioLanguages = inputs.to_keep_audio_languages.split(',');
-        let audioFFmpegCommandArgs = [];
-        let audioTracksOrder = [];
-        const allAudioStreams = file.ffProbeData.streams.filter(stream => stream.codec_type.toLowerCase() === "audio");
-
-        allAudioStreams.forEach((currentStream, audioStreamsId) => {
+        let audioActions = [];
+        let audioStreamId = 0;
+        allStreams.forEach((currentStream, globalStreamId) => {
+            currentStream.filter(stream => stream.codec_type.toLowerCase() === "audio"); return;
             const currentStreamTitle = currentStream?.tags?.title?.toLowerCase() ?? "";
-            const currentStreamLanguageTag = currentStream?.tags?.language?.toLowerCase() ?? "";
+            const currentStreamLanguageTag = currentStream?.tags?.language?.toLowerCase() ?? "und";
             const currentStreamCodec = currentStream?.codec_name?.toLowerCase() ?? "";
-            const currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
+            const currentStreamProfile = currentStream?.profile ?? "";
+            let currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
+            if (!currentStreamBitRate) {
+                const potentialBitRate = currentStream?.tags?.BPS;
+                currentStreamBitRate = potentialBitRate ? Number(potentialBitRate) : 0;
+            }
+            let  currentStreamCodecTag = currentStreamCodec;
+            if (currentStreamProfile){
+                currentStreamCodecTag = `${currentStreamCodecTag}:${currentStreamProfile}`;
+            }
+            const currentStreamChannels = currentStream?.channels;
+            const currentStreamChannelLayout = currentStream?.channel_layout;
             const currentStreamIsCommentary = currentStream?.disposition?.comment ?? 0;
             const currentStreamIsHearingImpaired = currentStream?.disposition?.hearing_impaired ?? 0;
             const currentStreamIsVisualImpaired = currentStream?.disposition?.visual_impaired ?? 0;
 
             const isCommentaryTrack = currentStreamTitle.includes('commentary') || currentStreamTitle.includes('description') || currentStreamTitle.includes('sdh') || currentStreamIsCommentary || currentStreamIsHearingImpaired || currentStreamIsVisualImpaired;
             let higherQualityTrackFound = false;
-
-            if (discardStreamIfHigherQualityFound.some(discardStream => discardStream[0] === currentStreamCodec && discardStream[1] === currentStreamBitRate) && allAudioStreams.some(selectedAudioStream => {
-                const selectedStreamCodec = selectedAudioStream?.codec_name?.toLowerCase() ?? "";
-                const selectedStreamBitRate = selectedAudioStream?.bit_rate ? Number(selectedAudioStream?.bit_rate) :  0;
+            if (discardStreamIfHigherQualityFound.some(otherStream => otherStream[0] === currentStreamCodec && otherStream[1] === currentStreamBitRate) && allStreams.some(selectedStream => {
+                const selectedStreamCodec = selectedStream?.codec_name?.toLowerCase() ?? "";
+                const selectedStreamBitRate = selectedStream?.bit_rate ? Number(selectedStream?.bit_rate) : 0;
                 return selectedStreamCodec === currentStreamCodec && selectedStreamBitRate > currentStreamBitRate;
             })){
                 higherQualityTrackFound = true;
             }
 
-            if (toKeepAudioLanguages.includes(currentStreamLanguageTag) && !isCommentaryTrack && !higherQualityTrackFound) {
-                audioTracksOrder.push([audioStreamsId, currentStreamLanguageTag, true, isCommentaryTrack]);
-            } else{
-                audioTracksOrder.push([audioStreamsId, currentStreamLanguageTag, false, isCommentaryTrack]);
+            const currentAudioStreamFormats = [currentStreamChannels,currentStreamChannelLayout];
+            if (isCommentaryTrack) currentAudioStreamFormats.push("commentary");
+            const keepCurrentAudioStream = toKeepAudioLanguages.includes(currentStreamLanguageTag) && !isCommentaryTrack && !higherQualityTrackFound;
+            audioActions.push([!keepCurrentAudioStream ? Muxing.actionsEnum.DISCARD : Muxing.actionsEnum.COPY,
+                Muxing.formatAction(
+                    globalStreamId,
+                    'a',
+                    audioStreamId,
+                    currentStreamCodecTag,
+                    currentStreamLanguageTag,
+                    currentStreamBitRate,
+                    currentStreamTitle,
+                    audioStreamId === 0,
+                    currentAudioStreamFormats)]);
+
+            if (!keepCurrentAudioStream) {
                 if (isCommentaryTrack){
-                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} detected as being descriptive, removing. \n`;
+                    response.infoLog += `☒Audio stream 0:a:${audioStreamId} detected as being descriptive, removing. \n`;
                 } else{
-                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} has unwanted language tag ${currentStreamLanguageTag}, removing. \n`;
+                    response.infoLog += `☒Audio stream 0:a:${audioStreamId} has unwanted language tag ${currentStreamLanguageTag}, removing. \n`;
                 }
                 if (higherQualityTrackFound){
-                    response.infoLog += `☒Audio stream 0:a:${audioStreamsId} discard as a higher quality track is available, removing. \n`;
+                    response.infoLog += `☒Audio stream 0:a:${audioStreamId} discard as a higher quality track is available, removing. \n`;
                 }
             }
+            audioStreamId++;
         });
 
-        if (audioTracksOrder.filter(audioTrack => audioTrack[2]).length === 0){
-            if (audioTracksOrder[0]){
-                audioTracksOrder[0][2] = true;
+        if (audioActions.filter(audioStream => audioStream[0] === Muxing.actionsEnum.COPY).length === 0){
+            if (audioActions[0]){
+                audioActions[0][0] = Muxing.actionsEnum.COPY;
                 response.infoLog += '☒Re-added first audio stream to prevent no audio. \n';
             }
-            if (audioTracksOrder[1] && audioTracksOrder[0]?.tags?.language?.toLowerCase() === audioTracksOrder[1]?.tags?.language?.toLowerCase() && audioTracksOrder[1][3] !== true){
-                audioTracksOrder[1][2] = true;
+            if (audioActions[1] && audioActions[0][1].get("language") === audioActions[1][1].get("language") && audioActions[1][0] === Muxing.actionsEnum.DISCARD && !audioActions[1][1].get("formats").includes("commentary")){
+                audioActions[1][0] = Muxing.actionsEnum.COPY;
                 response.infoLog += '☒First audio stream is probably DTS:X or Dolby TrueHD, adding second audio stream back as well. \n';
             }
         }
 
-        audioTracksOrder.sort((a, b) => {
-            let indexA = toKeepAudioLanguages.indexOf(a[1]);
-            let indexB = toKeepAudioLanguages.indexOf(b[1]);
-            if (indexA === -1) indexA = toKeepAudioLanguages.length;
-            if (indexB === -1) indexB = toKeepAudioLanguages.length;
+        audioActions.sort((a, b) => {
+            let indexA = codecQualityOrder.indexOf(a[1].get("codec"));
+            let indexB = codecQualityOrder.indexOf(b[1].get("codec"));
+            if (indexA === -1) indexA = codecQualityOrder.length;
+            if (indexB === -1) indexB = codecQualityOrder.length;
+            const aChannelCount = a[1].get("formats")[0];
+            const bChannelCount = a[1].get("formats")[0];
+
+            if (indexA === indexB) {
+                if (aChannelCount === bChannelCount) {
+                    return b[1].get("bitrate") - a[1].get("bitrate");
+                }
+                return bChannelCount - aChannelCount;
+            }
             return indexA - indexB;
         })
 
-        audioTracksOrder.forEach((audioTrack, index) => {
-            const audioStreamsId = audioTrack[0];
-            const keepAudioStream = audioTrack[2];
+        const bestSourceAudio = audioActions[0][1];
 
-            if (index === 0){
-                audioFFmpegCommandArgs.push(`-map 0:a:${audioStreamsId} -disposition:a:0 default`)
-            } else{
-                audioFFmpegCommandArgs.push(`-map ${keepAudioStream ? "" : "-"}0:a:${audioStreamsId}  ${keepAudioStream ? `-disposition:a:${audioStreamsId} 0` : ""}`);
-            }
-
-
-            if (Boolean(inputs.tag_title_for_audio) === true){
-                const currentStream = allAudioStreams[audioStreamsId];
-                const currentStreamCodec = currentStream?.codec_name?.toLowerCase() ?? "";
-                const currentStreamProfile = currentStream?.profile ?? "";
-                const currentStreamChannelLayout = currentStream?.channel_layout;
-                const currentStreamTitle = currentStream?.tags?.title ?? "";
-                const currentStreamLanguage = currentStream?.tags?.language ?? "und";
-
-                let currentStreamCodecTag = currentStreamCodec;
-                if (currentStreamProfile){
-                    currentStreamCodecTag = `${currentStreamCodecTag}:${currentStreamProfile}`;
-                }
-
-                const audioStreamTitle = getAudioTrackTitle(currentStreamCodecTag,currentStreamChannelLayout,currentStreamLanguage,currentStreamTitle);
-                audioFFmpegCommandArgs.push(`-metadata:s:a:${audioStreamsId} title="${audioStreamTitle}"`);
-            }
-        });
 
         return [response, audioFFmpegCommandArgs.join(" ")];
     }
@@ -479,8 +681,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     response.container = getTargetContainerType(inputs, response);
 
-    const cleanVideoResults = cleanVideoStreams(inputs, response);
-    response = cleanVideoResults[0];
+    const videoStreamActions = generateVideoStreamActions(inputs);
     ffmpegCommandArgs.push(cleanVideoResults[1]);
 
     const cleanAudioResults = cleanAudioStreams(inputs, response);
@@ -500,7 +701,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         ffmpegCommandArgs.push("-strict unofficial");
     }
 
-    if (specialVideoStreamsResults[1].filter(stream => stream[2][0] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
+    if (specialVideoStreamsResults[1].filter(stream => stream[3][0] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
         response.infoLog += `☒ File says it supports Dolby Vision, However no DoVi Metadata could be found. \n`;
     }
 
