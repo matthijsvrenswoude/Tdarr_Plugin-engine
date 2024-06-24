@@ -122,6 +122,19 @@ const details = () => {
                    eng,jpn`,
             },
             {
+                name: 'cleanup_text_subtitles',
+                type: 'boolean',
+                defaultValue: true,
+                inputUI: {
+                    type: 'dropdown',
+                    options: [
+                        'false',
+                        'true',
+                    ],
+                },
+                tooltip: 'Allow clean up of Text subtitles'
+            },
+            {
                 name: 'temporary_force_clean',
                 type: 'boolean',
                 defaultValue: false,
@@ -153,7 +166,7 @@ class Muxing {
             ['type', type],
             ['typeStreamId', typeStreamId],
             ['codec', currentStreamCodec],
-            ['bitrate', currentStreamBitRate],
+            ['bitrate', Number(currentStreamBitRate)],
             ['language', currentStreamLanguage],
             ['title',title],
             ['default', defaultStream],
@@ -171,10 +184,12 @@ function createCompatibleCodecItem(codec,maxBitrate,maxChannels) {
     ]);
 }
 
-function createCodecLimit(codec,maxChannels) {
+function createCodecLimit(codec,minChannels,maxChannels,enforceStrict) {
     return new Map([
         ['codec', codec],
+        ['minChannels', minChannels],
         ['maxChannels', maxChannels],
+        ['strict', enforceStrict],
     ]);
 }
 
@@ -288,69 +303,91 @@ class MP4BoxExtractor {
 }
 
 class FFMpegTranscoder{
-
-    //"dvd_subtitle" no
     programPath = "";
+    savePath = "";
+    originalFile = null;
+    fileActions = [];
 
-    compatibleDecodingCodecs = new Map([
-        ['mp4', [
-            "h264",
-            "hevc",
-            "mpeg4",
-            "vc1",
-            "av1",
-            "eac3",
-            "ac3",
-            "aac:LC",
-            "opus",
-            "mov_text"
-        ]],
-    ]);
+    decodeableCodecs = new Map([
+        ["h264", true],
+        ["hevc", true],
+        ["mpeg4", true],
+        ["vc1", true],
+        ["av1", true],
+        ["dts:DTS-HD MA", true],
+        ["dts:DTS-HD", true],
+        ["dts:DTS", true],
+        ["truehd", false],
+        ["eac3", true],
+        ["ac3", true],
+        ["aac:LC", true],
+        ["opus", true],
+        ["mov_text", true],
+        ["subrip", true],
+        ["hdmv_pgs_subtitle", false],
+        ["dvd_subtitle", false],
+    ])
 
-    compatibleCodecs = new Map([
-        ['mp4', [
-            "h264",
-            "hevc",
-            "mpeg4",
-            "vc1",
-            "av1",
-            "eac3",
-            "ac3",
-            "aac:LC",
-            "opus",
-            "mov_text"
-        ]],
-        ['mkv', [
-            "h264",
-            "hevc",
-            "mpeg4",
-            "av1",
-            "vc1",
-            "dts:DTS-HD MA",
-            "dts:DTS-HD",
-            "dts:DTS",
-            "truehd",
-            "eac3",
-            "ac3",
-            "aac:LC",
-            "opus",
-            "subrip",
-            "hdmv_pgs_subtitle",
-            "dvd_subtitle"
-        ]]
-    ]);
+    encodeableCodecs = new Map ([
+        ["h264", true],
+        ["hevc", true],
+        ["mpeg4", true],
+        ["vc1", false],
+        ["av1", true],
+        ["dts:DTS-HD MA", false],
+        ["dts:DTS-HD", false],
+        ["dts:DTS", false],
+        ["truehd", false],
+        ["eac3", false],
+        ["ac3", true],
+        ["aac:LC", true],
+        ["opus", true],
+        ["mov_text", true],
+        ["subrip", true],
+        ["hdmv_pgs_subtitle", false],
+        ["dvd_subtitle", false],
+    ])
 
     exportToRawHevc(action){
         "ffmpeg -i input.mkv -c:v copy -bsf:v hevc_mp4toannexb -f hevc -"
     }
 
 
-    constructor(pathVars){
+    constructor(pathVars,originalFile,savePath) {
         this.programPath = pathVars.get("ffmpeg");
+        this.originalFile = originalFile;
+        this.savePath = savePath;
     }
 
-    preformTranscode(){
-        //convert audio
+    loadActions(actions){
+        const toLoadActions = [];
+        actions.forEach(action => {
+            if (action[0] !== Muxing.actionsEnum.CREATE) return;
+
+
+            this.
+
+            toLoadActions.push(action);
+        })
+        this.fileActions = toLoadActions;
+        return actions;
+    }
+
+    preformExtraction(){
+        return this.fileActions.map(action => {
+            return this.executeAction(action);
+        })
+    }
+
+    executeAction(action){
+        const newFileExtension = parseCodecToFileExtension(action[1].get("codec"))
+        const newFileName = `${this.originalFile.get("baseName")}.${action[1].get("language")}.${action[1].get("typeStreamId")}.${newFileExtension}`;
+        const exportFile = `${this.savePath}${newFileName}`;
+        return new Map([
+            ["preset",`${this.programPath} -single ${action[1].get("globalStreamId")} ${this.originalFile.get("complete")} ${exportFile}`],
+            ["file",exportFile]
+        ]);
+
         "ffmpeg -i The.Hangover.Part.III.2013.2160p.HDR.WEBRip.DTS-HD.MA.5.1.x265-GASMASK.dts -map_metadata -1 -map 0:a:0 -c:a:0 ac3 -b:a:0 640k -ac:a:0 6 -strict unofficial audio2.ac3"
 
         //fix audio channels from 6.1
@@ -399,13 +436,13 @@ class DoViToolsMuxer {
     };
 
     generatePresets(){
-        if (!this.fileActions[0]) return;
-        const primaryDoViStream = this.fileActions[0];
-        const [formatType, dolbyVisionProfile, dolbyVisionLevel] = primaryDoViStream.get("formats").some(supportedFormats => supportedFormats[0] === "Dolby Vision");
+        if (this.fileActions.length !== 1) return;
+        const primaryDoViStreamAction = this.fileActions[0];
+        const [formatType, dolbyVisionProfile, dolbyVisionLevel] = primaryDoViStreamAction.get("formats").some(supportedFormats => supportedFormats[0] === "Dolby Vision");
         if (Number(dolbyVisionProfile) === 7){
-            this.FFMpegTranscoder.exportToRawHevc(primaryDoViStream);
+            this.FFMpegTranscoder.exportToRawHevc(primaryDoViStreamAction);
         } else{
-            this.MKVExtractExtractor.executeAction(primaryDoViStream);
+            this.MKVExtractExtractor.executeAction(primaryDoViStreamAction);
         }
     }
 }
@@ -523,21 +560,20 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     inputs.upgradeableCodecs = ["vc1","mpeg4","h264"];
 
-    inputs.allowSevenChannelAudio = false; //False converts 6.1 Audio to 5.1
-    inputs.codecLimits = [
-        createCodecLimit("aac:LC",6)
+    inputs.filterableSubtitleCodecs = ["subrip","mov_text"];
+
+    inputs.allowSevenChannelAudio = false; // False converts 6.1 Audio to 5.1
+    inputs.audioCodecLimits = [
+        createCodecLimit("aac:LC", 2,6,true),
+        createCodecLimit(["dts:DTS","dts:DTS-HD","dts:DTS-HD MA"], 6,8, false),
+        // StrictEnforce will always discard audioTrack if it fails the set requirements
+        // StrictEnforce disabled will only discard track if no higher channel track could be found.
+        // Providing an array as codec will treat all codecs as equal.
     ];
 
-    inputs.targetCodecs = [
+    inputs.targetAudioCodecs = [
         createTargetCodec("ac3",640000,6),
         createTargetCodec("aac:LC",256000,2),
-    ];
-
-    inputs.allowedExtractCodecs = [
-        createExtractCodec("dts:DTS-HD MA", 6),
-        createExtractCodec("dts:DTS-HD", 6),
-        createExtractCodec("dts:DTS", 6),
-        createExtractCodec("truehd", 0),
     ];
 
     const allStreams = file.ffProbeData.streams;
@@ -587,7 +623,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         if (inputs.temporary_force_clean){
             return false;
         }
-        if (mediaTitle.includes("[Organized]") || mediaTitle.includes("[Transcoded]")) {
+        if (mediaTitle.includes("[Organized]")) {
             response.infoLog += '☒File is already organized/transcoded, Skipping..\n';
             response.processFile = false;
             return response;
@@ -711,14 +747,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const currentStreamSpecialFormats = getStreamSpecialVideoFormats(videoStreamsId,currentStream);
             const isCurrentStreamDoVi = currentStreamSpecialFormats.some(format => format[0] === "Dolby Vision");
 
-            //convert audio
-            "ffmpeg -i The.Hangover.Part.III.2013.2160p.HDR.WEBRip.DTS-HD.MA.5.1.x265-GASMASK.dts -map_metadata -1 -map 0:a:0 -c:a:0 ac3 -b:a:0 640k -ac:a:0 6 -strict unofficial audio2.ac3"
-
-            //fix audio channels from 6.1
-            "ffmpeg -i \"Prison Break (2005) - S03E09 - Boxed In (1080p BluRay x265 Silence).mkv\" -map 0 -c:v copy -c:a:0 aac -ac:a:0 6 -strict unofficial \"Prison Break (2005) - S03E09 - Boxed In (1080p BluRay x265 Silence)2.mkv\""
-
-            "ffmpeg -i input.mp4 -c:v hevc_nvenc -preset p7 -cq 16 -c:a copy output.mp4"
-
             let currentStreamActionFormat = Muxing.formatAction(
                 globalStreamId,
                 'v',
@@ -729,7 +757,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 currentStreamTitle,
                 videoStreamsId === 0,
                 currentStreamSpecialFormats);
-
+            let currentStreamActionModifications = null;
             let currentStreamAction = Muxing.actionsEnum.DISCARD;
             if (!removeCurrentStream){
                 if (isCurrentStreamDoVi){
@@ -738,11 +766,11 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     currentStreamAction = Muxing.actionsEnum.COPY
                     if (inputs.upgrade_legacy_video && inputs.upgradeableCodecs.includes(currentStreamCodec)){
                         currentStreamAction = Muxing.actionsEnum.CREATE;
-                        currentStreamActionFormat.set("codec","hevc");
+                        currentStreamActionModifications = new Map([["codec","hevc"]])
                     }
                 }
             }
-            videoActions.push([currentStreamAction, currentStreamActionFormat]);
+            videoActions.push([currentStreamAction, currentStreamActionFormat,currentStreamActionModifications]);
             videoStreamsId++;
         });
         return videoActions;
@@ -888,25 +916,20 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         }
 
 
-        // Remove lower quality Audio tracks of the same codec and channelLayout
+        // Remove lower quality Audio tracks of the same codec and channelCount
         for (let index = audioActions.length - 1; index >= 0; index--) {
             const action = audioActions[index];
             if(action[0] === Muxing.actionsEnum.DISCARD) continue;
             const currentActionCodec = action[1].get("codec");
             const currentActionAudioStreamId = action[1].get("typeStreamId");
             const currentActionLanguage = action[1].get("language");
-            const currentActionBitrate = Number(action[1].get("bitrate"));
-            const isHigherQualityTrackAvailable = audioActions.some(selectedAction => {
-                if (selectedAction[0] !== Muxing.actionsEnum.DISCARD &&
-                    currentActionCodec === selectedAction[1].get("codec") &&
-                    currentActionLanguage === selectedAction[1].get("language") &&
-                    currentActionBitrate <= Number(selectedAction[1].get("bitrate")) &&
-                    currentActionAudioStreamId !== selectedAction[1].get("typeStreamId")
-                ){
-                    return true;
-                }
-                return false;
-            })
+            const currentActionBitrate = action[1].get("bitrate");
+            const isHigherQualityTrackAvailable = audioActions.some(selectedAction =>
+                selectedAction[0] !== Muxing.actionsEnum.DISCARD &&
+                currentActionCodec === selectedAction[1].get("codec") &&
+                currentActionLanguage === selectedAction[1].get("language") &&
+                currentActionBitrate <= selectedAction[1].get("bitrate") &&
+                currentActionAudioStreamId !== selectedAction[1].get("typeStreamId"));
             if (isHigherQualityTrackAvailable){
                 response.infoLog += `☒Audio stream 0:a:${action[1].get("typeStreamId")} as ${currentActionCodec} discarded as a higher quality track is available, removing. \n`;
                 action[0] = Muxing.actionsEnum.DISCARD;
@@ -921,23 +944,61 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         // Apply total channel limits per codec and Downmux 6.1 audio to 5.1 surround.
         audioActions = audioActions.map((action) => {
             if(action[0] === Muxing.actionsEnum.DISCARD) return action;
-            const currentActionCodecLimit = inputs.codecLimits.find(codecLimit => codecLimit.get("codec") === action[1].get("codec"));
+            const currentActionCodecLimit = inputs.audioCodecLimits.find(codecLimit => {
+                const codecLimitCodec = action[1].get("codec");
+                if(Array.isArray(codecLimitCodec)){
+                    return codecLimitCodec.includes(codecLimit.get("codec"));
+                }
+                return codecLimit.get("codec") === codecLimitCodec;
+            });
             if (currentActionCodecLimit){
                 const currentActionFormat = action[1];
+                const currentActionCodec = currentActionFormat.get("codec");
+                const currentActionBitrate = currentActionFormat.get("bitrate");
                 const currentActionAudioFormats = currentActionFormat.get("formats");
+                const codecLimitMinChannels = currentActionCodecLimit.get("minChannels");
                 const codecLimitMaxChannels = currentActionCodecLimit.get("maxChannels");
-                const currentActionChannels = Number(currentActionAudioFormats[0]);
+                const codecLimitEnforceStrict = currentActionCodecLimit.get("enforceStrict");
+                const currentActionChannels = currentActionAudioFormats[0];
                 if (currentActionChannels > codecLimitMaxChannels){
-                    currentActionAudioFormats[0] = codecLimitMaxChannels;
-                    currentActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
-                    currentActionFormat.set("formats",currentActionAudioFormats);
-                    return [Muxing.actionsEnum.CREATE, currentActionFormat];
+                    const currentBitratePerChannel = currentActionBitrate / currentActionChannels;
+                    const possibleTargetTrack = audioActions.find(
+                        selectedAction => selectedAction[0] !== Muxing.actionsEnum.DISCARD &&
+                            currentActionCodec === selectedAction[1].get("codec") &&
+                            currentActionFormat.get("language") === selectedAction[1].get("language") &&
+                            currentActionFormat.get("formats")[0] === selectedAction[1].get("formats")[0]);
+                    if (possibleTargetTrack && (possibleTargetTrack[1].get("bitrate") >= currentBitratePerChannel * codecLimitMaxChannels)){
+                        return [Muxing.actionsEnum.DISCARD, currentActionFormat];
+                    } else{
+                        currentActionAudioFormats[0] = codecLimitMaxChannels;
+                        currentActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
+                        return [Muxing.actionsEnum.CREATE, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
+                    }
                 }
+
+                if (currentActionChannels < codecLimitMinChannels){
+                    if (codecLimitEnforceStrict){
+                        return [Muxing.actionsEnum.DISCARD, currentActionFormat];
+                    } else{
+                        const possibleBetterTrack = audioActions.find(
+                            selectedAction => {
+                                const selectedActionCodec = selectedAction[1].get("codec");
+                                const doesSelectedActionMatchCurrentCodec = Array.isArray(selectedActionCodec) ? selectedActionCodec.includes(currentActionCodec) : currentActionCodec === selectedActionCodec;
+                                return selectedAction[0] !== Muxing.actionsEnum.DISCARD &&
+                                    doesSelectedActionMatchCurrentCodec &&
+                                    currentActionFormat.get("language") === selectedAction[1].get("language") &&
+                                    selectedAction.get("formats")[0] >= codecLimitMinChannels
+                            });
+                        if (possibleBetterTrack){
+                            return [Muxing.actionsEnum.DISCARD, currentActionFormat];
+                        }
+                    }
+                }
+
                 if (!inputs.allowSevenChannelAudio && currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1")){
                     currentActionAudioFormats[0] = 6;
                     currentActionAudioFormats[1] = "5.1";
-                    currentActionFormat.set("formats",currentActionAudioFormats);
-                    return [Muxing.actionsEnum.CREATE, currentActionFormat];
+                    return [Muxing.actionsEnum.CREATE, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
                 }
             }
             return action;
@@ -955,13 +1016,14 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         })
 
         bestAudioStreamsPerLanguage.forEach(bestAudioStreamsPerLanguage => {
-            const bestAudioStreamChannels = bestAudioStreamsPerLanguage[1].get("formats")[0];
+            const bestAudioStreamFormats = bestAudioStreamsPerLanguage[1].get("formats");
+            const bestAudioStreamChannels = bestAudioStreamFormats[0];
             const bestAudioStreamBitrate = bestAudioStreamsPerLanguage[1].get("bitrate");
             const bestAudioStreamLanguage = bestAudioStreamsPerLanguage[1].get("language");
             const bestAudioStreamGlobalId = bestAudioStreamsPerLanguage[1].get("globalStreamId");
             const bestAudioStreamAudioStreamId = bestAudioStreamsPerLanguage[1].get("typeStreamId");
 
-            inputs.targetCodecs.forEach((targetCodec) => {
+            inputs.targetAudioCodecs.forEach((targetCodec) => {
                 const doesAudioAlreadyExists = audioActions.find(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec"));
                 if (!doesAudioAlreadyExists){
                     let newAudioStreamCodec = targetCodec.get("targetCodec");
@@ -970,11 +1032,12 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     let newAudioStreamChannelLayout = targetCodec.get("targetChannels");
 
                     if (bestAudioStreamBitrate > newAudioStreamBitrate){
+                        let newAudioStreamFormats = null;
                         if (bestAudioStreamChannels < newAudioStreamChannels){
-                            newAudioStreamChannels = bestAudioStreamChannels;
-                            newAudioStreamChannelLayout = bestAudioStreamChannels;
+                            let newAudioStreamFormats = bestAudioStreamFormats;
+                            newAudioStreamFormats[0] = bestAudioStreamChannels;
+                            newAudioStreamFormats[1] = parseChannelsToChannelLayout(bestAudioStreamChannels);
                         }
-
                         audioActions.push([
                             Muxing.actionsEnum.CREATE,
                             Muxing.formatAction(
@@ -986,8 +1049,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                                 newAudioStreamBitrate,
                                 "",
                                 false,
-                                [newAudioStreamChannels,newAudioStreamChannelLayout]
-                            )])
+                                [newAudioStreamChannels,newAudioStreamChannelLayout]),
+                            new Map([["formats", newAudioStreamFormats]])
+                        ]);
                         response.infoLog += `Created new ${newAudioStreamCodec} ${newAudioStreamChannelLayout} track \n`;
                     }
                 }
@@ -1074,7 +1138,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     const cacheFileDirectory = getFileDetails(otherArguments.cacheFilePath)[0].replaceAll("\\","/");
     const originalFile = otherArguments.originalLibraryFile.file;
     const [originalFileDirectory, originalFileName,  baseFileName, fileExtension] = getFileDetails(originalFile);
-
     const originalFileDetails = new Map([
         ['directory', originalFileDirectory],
         ['name', originalFileName],
@@ -1130,13 +1193,13 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     console.log([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].filter(item => item[0] !== Muxing.actionsEnum.DISCARD));
 
     const fs = require('fs')
-    fs.writeFileSync('file.json', JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
+    fs.writeFileSync(`${originalFileDirectory}/file.json`, JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
     return;
     videoPresetGeneratorInterface.loadActions([...videoStreamActions,...audioStreamActions,...subtitleStreamActions]);
     const presets = videoPresetGeneratorInterface.generatePresets();
 
 
-    if (specialVideoStreamsResults[1].filter(stream => stream[3][0] === "Dolby Vision").length === 0 && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
+    if (!doesFileContainDoVi && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
         response.infoLog += `☒ File says it includes Dolby Vision, However no DoVi Metadata could be found. \n`;
     }
 
