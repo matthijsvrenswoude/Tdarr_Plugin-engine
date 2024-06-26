@@ -156,6 +156,7 @@ class Muxing {
     static actionsEnum = Object.freeze({
         EXTRACT:   "EXTRACT",
         CREATE:   "CREATE",
+        MODIFY:   "MODIFY",
         COPY:  "COPY",
         COPYDOVI:  "COPYDOVI",
         DISCARD: "DISCARD"
@@ -219,8 +220,20 @@ function parseCodecToFileExtension(codecName){
         ['dts:DTS-HD', 'dts'],
         ['dts:DTS', 'dts'],
         ['opus', 'opus'],
+        ["subrip", "srt"],
+        ["mov_text", "txt"]
     ]);
     return codecDictionary.get(codecName) ?? ""
+}
+
+function getModifiedActionValue(action,property, noFallback = false){
+    if (action.hasOwnProperty(2) && action[2].get(property)){
+        return action[2].get(property);
+    }
+    if (!noFallback){
+        return action[1].get(property);
+    }
+    return null;
 }
 
 
@@ -362,11 +375,20 @@ class FFMpegTranscoder{
     loadActions(actions){
         const toLoadActions = [];
         actions.forEach(action => {
-            if (action[0] !== Muxing.actionsEnum.CREATE) return;
+            const [actionType, actionData, actionModifications] = action;
+            if (actionType !== Muxing.actionsEnum.MODIFY && actionType !== Muxing.actionsEnum.CREATE) return;
+            const decodingCodec = this.decodeableCodecs.get(actionData.get("codec"));
+            let encodingCodec = this.encodeableCodecs.get(actionData.get("codec"));
+            if (actionModifications.has("codec")){
+                encodingCodec = this.encodeableCodecs.get(actionModifications.get("codec"));
+            }
 
-
-            this.
-
+            let error = [];
+            if(decodingCodec === undefined) error.push(`Failed to load action, failed to determine decoder support for codec: ${decodingCodec}`);
+            if(decodingCodec === false) error.push(`Failed to load action, FFMpeg has no decoder for codec: ${decodingCodec}`);
+            if(encodingCodec === undefined) error.push(`Failed to load action, failed to determine encoder support for codec: ${encodingCodec}`);
+            if(encodingCodec === false) error.push(`Failed to load action, FFMpeg has no encoder for codec: ${decodingCodec}`);
+            if (error) throw error.join(" ");
             toLoadActions.push(action);
         })
         this.fileActions = toLoadActions;
@@ -380,21 +402,33 @@ class FFMpegTranscoder{
     }
 
     executeAction(action){
-        const newFileExtension = parseCodecToFileExtension(action[1].get("codec"))
+        const newFileExtension = parseCodecToFileExtension(getModifiedActionValue(action,"codec"))
         const newFileName = `${this.originalFile.get("baseName")}.${action[1].get("language")}.${action[1].get("typeStreamId")}.${newFileExtension}`;
         const exportFile = `${this.savePath}${newFileName}`;
+        let preset = `${this.programPath} -single ${action[1].get("globalStreamId")} ${this.originalFile.get("complete")} ${exportFile}`;
+
+        switch (action[1].get("type")){
+            case "v":
+                preset = `${this.programPath} -i ${this.originalFile.get("complete")} -an -map 0:v:${action[1].get("typeStreamId")} -c:v hevc_nvenc -tune hq -preset p7 -cq 16 -strict unofficial ${exportFile}`;
+                break;
+
+            case "a":
+                const newActionBitrate = getModifiedActionValue(action, "bitrate", true);
+                preset = `${this.programPath} -i ${this.originalFile.get("complete")} -vn -map 0:a:${action[1].get("typeStreamId")} -c:a ${getModifiedActionValue(action,"codec")} ${newActionBitrate ? `-b:a ${newActionBitrate / 1000}k` : ""} -ac:a ${getModifiedActionValue(action,"formats")[0]} -strict unofficial ${exportFile}`;
+
+                // `ffmpeg -i input.wav -vn -ac 2 -c:a libfdk_aac -b:a 256k output.m4a`
+                break;
+            case "s":
+                preset = `${this.programPath} -i ${this.originalFile.get("complete")} -sn -map 0:s:${action[1].get("typeStreamId")} -c:s ${getModifiedActionValue(action,"codec")} -strict unofficial ${exportFile}`;
+                break;
+            default:
+                break;
+        }
+
         return new Map([
-            ["preset",`${this.programPath} -single ${action[1].get("globalStreamId")} ${this.originalFile.get("complete")} ${exportFile}`],
+            ["preset", preset],
             ["file",exportFile]
         ]);
-
-        "ffmpeg -i The.Hangover.Part.III.2013.2160p.HDR.WEBRip.DTS-HD.MA.5.1.x265-GASMASK.dts -map_metadata -1 -map 0:a:0 -c:a:0 ac3 -b:a:0 640k -ac:a:0 6 -strict unofficial audio2.ac3"
-
-        //fix audio channels from 6.1
-        "ffmpeg -i \"Prison Break (2005) - S03E09 - Boxed In (1080p BluRay x265 Silence).mkv\" -map 0 -c:v copy -c:a:0 aac -ac:a:0 6 -strict unofficial \"Prison Break (2005) - S03E09 - Boxed In (1080p BluRay x265 Silence)2.mkv\""
-
-        "ffmpeg -i input.mp4 -c:v hevc_nvenc -preset p7 -cq 16 -c:a copy output.mp4"
-
     }
 }
 
@@ -452,6 +486,7 @@ class MP4BoxPresetGenerator {
     extractorInterface = null;
     transcoderInterface = null;
     doviMuxerInterface = null;
+    fileMetaData = null;
     actions = [];
 
     compatibleCodecs = new Map([
@@ -477,10 +512,18 @@ class MP4BoxPresetGenerator {
         this.doviMuxerInterface = doviMuxerInterface;
     }
 
-    loadActions(actions){
+    loadFileMetaData(fileMetaData){
+        this.fileMetaData = fileMetaData;
     };
 
+
+    loadActions(actions){
+        this.fileActions = [...this.fileActions,actions];
+    };
+
+
     generatePresets(){
+        if (!this.fileActions || !this.fileMetaData) return;
         if(this.actions.filter(action => [Muxing.actionsEnum.DISCARD,Muxing.actionsEnum.EXTRACT].includes(action[0])).length === this.actions.length){
             "mp4box -rem 3 sample.mp4"
         }
@@ -729,8 +772,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return currentStreamVideoFormats;
     }
 
-    function generateVideoStreamActions(inputs){
-
+    function generateVideoStreamActions(inputs, videoTranscoderInterface){
         const toRemoveVideoCodecs = inputs.to_remove_video_codecs.split(',');
         let videoActions = [];
         let videoStreamsId = 0;
@@ -765,12 +807,16 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 } else{
                     currentStreamAction = Muxing.actionsEnum.COPY
                     if (inputs.upgrade_legacy_video && inputs.upgradeableCodecs.includes(currentStreamCodec)){
-                        currentStreamAction = Muxing.actionsEnum.CREATE;
+                        currentStreamAction = Muxing.actionsEnum.MODIFY;
                         currentStreamActionModifications = new Map([["codec","hevc"]])
                     }
                 }
             }
-            videoActions.push([currentStreamAction, currentStreamActionFormat,currentStreamActionModifications]);
+            if(currentStreamActionModifications){
+                videoActions.push([currentStreamAction, currentStreamActionFormat,currentStreamActionModifications]);
+            } else{
+                videoActions.push([currentStreamAction, currentStreamActionFormat]);
+            }
             videoStreamsId++;
         });
         return videoActions;
@@ -836,8 +882,9 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         ];
 
         audioActions.sort((a, b) => {
-            let indexA = codecQualityOrder.indexOf(a[1].get("codec"));
-            let indexB = codecQualityOrder.indexOf(b[1].get("codec"));
+            let indexA = codecQualityOrder.indexOf(getModifiedActionValue(a,"codec"));
+            let indexB = codecQualityOrder.indexOf(getModifiedActionValue(b,"codec"));
+
             if (indexA === -1) indexA = codecQualityOrder.length;
             if (indexB === -1) indexB = codecQualityOrder.length;
             const aChannelCount = a[1].get("formats")[0];
@@ -855,7 +902,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
 
-    function generateAudioStreamActions(inputs){
+    function generateAudioStreamActions(inputs, videoTranscoderInterface){
         let audioActions = [];
         let audioStreamId = 0;
         allStreams.forEach((currentStream, globalStreamId) => {
@@ -867,6 +914,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             let currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
             if (!currentStreamBitRate) {
                 const potentialBitRate = currentStream?.tags?.BPS;
+                currentStreamBitRate = potentialBitRate ? Number(potentialBitRate) : 0;
+            }
+            if (!currentStreamBitRate) {
+                const potentialBitRate = currentStream?.tags[`BPS-${currentStreamLanguageTag}`];
                 currentStreamBitRate = potentialBitRate ? Number(potentialBitRate) : 0;
             }
             let  currentStreamCodecTag = currentStreamCodec;
@@ -972,7 +1023,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     } else{
                         currentActionAudioFormats[0] = codecLimitMaxChannels;
                         currentActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
-                        return [Muxing.actionsEnum.CREATE, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
+                        return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
                     }
                 }
 
@@ -998,7 +1049,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 if (!inputs.allowSevenChannelAudio && currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1")){
                     currentActionAudioFormats[0] = 6;
                     currentActionAudioFormats[1] = "5.1";
-                    return [Muxing.actionsEnum.CREATE, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
+                    return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
                 }
             }
             return action;
@@ -1012,57 +1063,72 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         }).filter((language) => language !== null))];
 
         const bestAudioStreamsPerLanguage = keptAudioStreamLanguages.map(language => {
-            return audioActions.find(audioStream => audioStream[0] !== Muxing.actionsEnum.DISCARD && audioStream[1].get("language") === language);
+            return audioActions.find(audioStream => audioStream[0] !== Muxing.actionsEnum.DISCARD && audioStream[1].get("language") === language && videoTranscoderInterface.decodeableCodecs.get(audioStream[1].get("codec")));
         })
 
-        bestAudioStreamsPerLanguage.forEach(bestAudioStreamsPerLanguage => {
-            const bestAudioStreamFormats = bestAudioStreamsPerLanguage[1].get("formats");
+        bestAudioStreamsPerLanguage.forEach(bestAudioStreamPerLanguage => {
+            if (!bestAudioStreamPerLanguage){
+                response.infoLog += `Tried adding extra audio tracks for ${bestAudioStreamPerLanguage[1].get("language")} however, no transcodeable source track could be found. \n`;
+                return
+            }
+            const bestAudioStreamFormats = bestAudioStreamPerLanguage[1].get("formats");
             const bestAudioStreamChannels = bestAudioStreamFormats[0];
-            const bestAudioStreamBitrate = bestAudioStreamsPerLanguage[1].get("bitrate");
-            const bestAudioStreamLanguage = bestAudioStreamsPerLanguage[1].get("language");
-            const bestAudioStreamGlobalId = bestAudioStreamsPerLanguage[1].get("globalStreamId");
-            const bestAudioStreamAudioStreamId = bestAudioStreamsPerLanguage[1].get("typeStreamId");
+            const bestAudioStreamBitrate = bestAudioStreamPerLanguage[1].get("bitrate");
 
             inputs.targetAudioCodecs.forEach((targetCodec) => {
                 const doesAudioAlreadyExists = audioActions.find(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec"));
                 if (!doesAudioAlreadyExists){
                     let newAudioStreamCodec = targetCodec.get("targetCodec");
                     const newAudioStreamBitrate = targetCodec.get("targetBitrate");
-                    let newAudioStreamChannels = targetCodec.get("targetChannels");
-                    let newAudioStreamChannelLayout = targetCodec.get("targetChannels");
 
-                    if (bestAudioStreamBitrate > newAudioStreamBitrate){
-                        let newAudioStreamFormats = null;
-                        if (bestAudioStreamChannels < newAudioStreamChannels){
-                            let newAudioStreamFormats = bestAudioStreamFormats;
+                    if (bestAudioStreamBitrate > newAudioStreamBitrate || bestAudioStreamBitrate === 0){
+                        let newAudioStreamFormats = bestAudioStreamFormats;
+                        if (bestAudioStreamChannels < targetCodec.get("targetChannels")){
                             newAudioStreamFormats[0] = bestAudioStreamChannels;
                             newAudioStreamFormats[1] = parseChannelsToChannelLayout(bestAudioStreamChannels);
                         }
                         audioActions.push([
                             Muxing.actionsEnum.CREATE,
-                            Muxing.formatAction(
-                                bestAudioStreamGlobalId,
-                                'a',
-                                bestAudioStreamAudioStreamId,
-                                newAudioStreamCodec,
-                                bestAudioStreamLanguage,
-                                newAudioStreamBitrate,
-                                "",
-                                false,
-                                [newAudioStreamChannels,newAudioStreamChannelLayout]),
-                            new Map([["formats", newAudioStreamFormats]])
+                            bestAudioStreamPerLanguage[1],
+                            new Map([
+                                ["codec", newAudioStreamCodec],
+                                ["bitrate", newAudioStreamBitrate],
+                                ["title", ""],
+                                ["defaultStream", false],
+                                ["formats", newAudioStreamFormats]
+                            ])
                         ]);
-                        response.infoLog += `Created new ${newAudioStreamCodec} ${newAudioStreamChannelLayout} track \n`;
+                        response.infoLog += `Created new ${newAudioStreamCodec} ${newAudioStreamFormats[1]} track \n`;
                     }
                 }
             });
+        })
+
+        // Set new AudioTrack title
+        audioActions = audioActions.map(currentAction => {
+            const newActionTitle = generateAudioTrackTitle(
+                getModifiedActionValue(currentAction,"codec"),
+                getModifiedActionValue(currentAction,"formats")[1],
+                currentAction[1].get("language"),
+                currentAction[1].get("title")
+            );
+            if (currentAction.hasOwnProperty(2)){
+                const currentActionModifications = currentAction[2];
+                currentActionModifications.set("title",newActionTitle);
+                currentAction[2] = currentActionModifications;
+            } else{
+                currentAction[2] = new Map([
+                    ["title", newActionTitle]
+                ]);
+            }
+            return currentAction;
         })
 
         audioActions = sortAudioStreamsOnQuality(audioActions);
         return audioActions;
     }
 
-    function generateSubtitleStreamActions(inputs){
+    function generateSubtitleStreamActions(inputs, videoTranscoderInterface){
         const toKeepSubtitleLanguages = inputs.to_keep_subtitle_languages.split(',');
         let subtitleActions = [];
         let subtitleStreamId = 0;
@@ -1146,19 +1212,21 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         ['complete', originalFile],
     ]);
 
-    const videoStreamActions = generateVideoStreamActions(inputs);
-    const audioStreamActions = generateAudioStreamActions(inputs);
-    const subtitleStreamActions = generateSubtitleStreamActions(inputs);
+    let videoTranscoderInterface = new FFMpegTranscoder(pathVars);
+
+    const videoStreamActions = generateVideoStreamActions(inputs, videoTranscoderInterface);
+    const audioStreamActions = generateAudioStreamActions(inputs, videoTranscoderInterface);
+    const subtitleStreamActions = generateSubtitleStreamActions(inputs, videoTranscoderInterface);
 
     const doesFileContainDoVi = videoStreamActions.some(action => action[1].get("formats").some(supportedFormat => supportedFormat[0] === "Dolby Vision"));
     const targetContainerType = setTargetContainerType(inputs, file, doesFileContainDoVi);
     const currentContainerType = file.container.toLowerCase();
 
     let videoExtractorInterface = null;
-    let videoTranscoderInterface = new FFMpegTranscoder(pathVars);
     let videoDoViMuxerInterface = new DoViToolsMuxer(pathVars,originalFileDetails,cacheFileDirectory);
     let videoPresetGeneratorInterface = null;
-    switch (`${currentContainerType}${targetContainerType}`){
+
+    switch (`.${currentContainerType}.${targetContainerType}`){
         case ".mkv.mkv":
             videoExtractorInterface = new MKVExtractExtractor(pathVars,originalFileDetails,originalFileDirectory);
             videoPresetGeneratorInterface = new FFMpegPresetGenerator(pathVars,videoExtractorInterface, videoTranscoderInterface, videoDoViMuxerInterface)
@@ -1184,24 +1252,25 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         ["currentContainerType",currentContainerType],
         ["targetContainerType",targetContainerType]
     ])
-    // videoPresetGeneratorInterface.loadFileMetaData(new Map([
-    //     ["fileTitle",newFileTitle],
-    //     ["currentContainerType",currentContainerType],
-    //     ["targetContainerType",targetContainerType]
-    // ]));
-
     console.log([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].filter(item => item[0] !== Muxing.actionsEnum.DISCARD));
+
+    videoPresetGeneratorInterface.loadFileMetaData(new Map([
+        ["fileTitle",newFileTitle],
+        ["currentContainerType",currentContainerType],
+        ["targetContainerType",targetContainerType]
+    ]));
+
+    videoPresetGeneratorInterface.loadActions([...videoStreamActions,...audioStreamActions,...subtitleStreamActions]);
+    console.log(videoPresetGeneratorInterface.generatePresets());
 
     const fs = require('fs')
     fs.writeFileSync(`${originalFileDirectory}/file.json`, JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
-    return;
-    videoPresetGeneratorInterface.loadActions([...videoStreamActions,...audioStreamActions,...subtitleStreamActions]);
-    const presets = videoPresetGeneratorInterface.generatePresets();
-
 
     if (!doesFileContainDoVi && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
         response.infoLog += `☒ File says it includes Dolby Vision, However no DoVi Metadata could be found. \n`;
     }
+
+    return response;
 
     response.container = targetContainerType;
     response.processFile = true;
