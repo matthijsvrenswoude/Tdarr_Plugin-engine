@@ -223,7 +223,26 @@ function parseCodecToFileExtension(codecName){
         ["subrip", "srt"],
         ["mov_text", "txt"]
     ]);
-    return codecDictionary.get(codecName) ?? ""
+    return codecDictionary.get(codecName) ?? "";
+}
+
+function parseCodecToCodecName(codecName){
+    const codecDictionary = new Map([
+        ['aac:LC', 'AAC'],
+        ['ac3', 'Dolby Digital'],
+        ['eac3', 'Dolby Digital+'],
+        ['truehd', 'Dolby TrueHD'],
+        ['dts:DTS-HD MA', 'DTS-HD Master Audio'],
+        ['dts:DTS-HD', 'DTS-HD'],
+        ['dts:DTS', 'DTS'],
+        ['opus', 'Opus'],
+        ['hdmv_pgs_subtitle', 'HDMV PGS'],
+        ['subrip', 'Subrip'],
+        ['mov_text', 'MovText'],
+        ['dvd_subtitle', 'VobSub'],
+        ['ass', 'SubStation Alpha']
+    ]);
+    return codecDictionary.get(codecName) ?? "";
 }
 
 function getModifiedActionValue(action,property, noFallback = false){
@@ -259,7 +278,7 @@ class MKVExtractExtractor {
         return actions;
     }
 
-    preformExtraction(){
+    processActions(){
         return this.fileActions.map(action => {
             return this.executeAction(action);
         })
@@ -295,10 +314,9 @@ class MP4BoxExtractor {
             }
         })
         this.fileActions = toLoadActions;
-        return actions;
     }
 
-    preformExtraction(){
+    processActions(){
         return this.fileActions.map(action => {
             return this.executeAction(action);
         })
@@ -317,6 +335,7 @@ class MP4BoxExtractor {
 
 class FFMpegTranscoder{
     programPath = "";
+    customFFmpegInstalls = [];
     savePath = "";
     originalFile = null;
     fileActions = [];
@@ -370,6 +389,15 @@ class FFMpegTranscoder{
         this.programPath = pathVars.get("ffmpeg");
         this.originalFile = originalFile;
         this.savePath = savePath;
+
+        if(pathVars.has("ffmpegfdk")){
+            this.customFFmpegInstalls.push(
+                new Map([
+                    ["applyToCodec", "aac:LC"],
+                    ["customPreset", (audioStreamId, bitrate, channels, exportFile) => `${pathVars.get("ffmpegfdk")} -i "${this.originalFile.get("complete")}" -vn -map 0:a:${audioStreamId} -c:a libfdk_aac ${bitrate} -ac:a ${channels} "${exportFile}"`]
+                ])
+            )
+        }
     }
 
     loadActions(actions){
@@ -388,14 +416,13 @@ class FFMpegTranscoder{
             if(decodingCodec === false) error.push(`Failed to load action, FFMpeg has no decoder for codec: ${decodingCodec}`);
             if(encodingCodec === undefined) error.push(`Failed to load action, failed to determine encoder support for codec: ${encodingCodec}`);
             if(encodingCodec === false) error.push(`Failed to load action, FFMpeg has no encoder for codec: ${decodingCodec}`);
-            if (error) throw error.join(" ");
+            if (error.length > 0) throw error.join(" ");
             toLoadActions.push(action);
         })
         this.fileActions = toLoadActions;
-        return actions;
     }
 
-    preformExtraction(){
+    processActions(){
         return this.fileActions.map(action => {
             return this.executeAction(action);
         })
@@ -409,17 +436,25 @@ class FFMpegTranscoder{
 
         switch (action[1].get("type")){
             case "v":
-                preset = `${this.programPath} -i ${this.originalFile.get("complete")} -an -map 0:v:${action[1].get("typeStreamId")} -c:v hevc_nvenc -tune hq -preset p7 -cq 16 -strict unofficial ${exportFile}`;
+                preset = `${this.programPath} -i "${this.originalFile.get("complete")}" -an -map 0:v:${action[1].get("typeStreamId")} -c:v hevc_nvenc -tune hq -preset p7 -cq 16 -strict unofficial "${exportFile}"`;
                 break;
 
             case "a":
+                const newActionCodec = getModifiedActionValue(action,"codec");
                 const newActionBitrate = getModifiedActionValue(action, "bitrate", true);
-                preset = `${this.programPath} -i ${this.originalFile.get("complete")} -vn -map 0:a:${action[1].get("typeStreamId")} -c:a ${getModifiedActionValue(action,"codec")} ${newActionBitrate ? `-b:a ${newActionBitrate / 1000}k` : ""} -ac:a ${getModifiedActionValue(action,"formats")[0]} -strict unofficial ${exportFile}`;
-
-                // `ffmpeg -i input.wav -vn -ac 2 -c:a libfdk_aac -b:a 256k output.m4a`
+                const newActionBitrateSetting = newActionBitrate ? `-b:a ${newActionBitrate / 1000}k` : "";
+                const newActionChannels = getModifiedActionValue(action,"formats")[0];
+                const potentialCustomPreset = this.customFFmpegInstalls.find(install => install.get("applyToCodec") === newActionCodec);
+                const newActionStreamId = action[1].get("typeStreamId");
+                if (potentialCustomPreset){
+                    const customPresetGenerator = potentialCustomPreset.get("customPreset");
+                    preset = customPresetGenerator(newActionStreamId, newActionBitrateSetting, newActionChannels, exportFile);
+                } else{
+                    preset = `${this.programPath} -i "${this.originalFile.get("complete")}" -vn -map 0:a:${newActionStreamId} -c:a ${newActionCodec.split(":")[0]} ${newActionBitrateSetting} -ac:a ${newActionChannels} -strict unofficial "${exportFile}"`;
+                }
                 break;
             case "s":
-                preset = `${this.programPath} -i ${this.originalFile.get("complete")} -sn -map 0:s:${action[1].get("typeStreamId")} -c:s ${getModifiedActionValue(action,"codec")} -strict unofficial ${exportFile}`;
+                preset = `${this.programPath} -i "${this.originalFile.get("complete")}" -sn -map 0:s:${action[1].get("typeStreamId")} -c:s ${getModifiedActionValue(action,"codec")} -strict unofficial "${exportFile}"`;
                 break;
             default:
                 break;
@@ -453,7 +488,7 @@ class DoViToolsMuxer {
             if (action[0] === Muxing.actionsEnum.COPYDOVI){
                 const currentActionDetails = action[1];
                 const currentActionCodec = currentActionDetails.get("codec");
-                if (![5,7,8].includes(Number(currentActionDetails.get("formats").some(supportedFormats => supportedFormats[0] === "Dolby Vision")[1]))){
+                if (![5,7,8].includes(Number(currentActionDetails.get("formats").find(supportedFormats => supportedFormats[0] === "Dolby Vision")[1]))){
                     throw `Dolby Vision profile is unsupported`;
                 }
                 if (!this.compatibleCodecs.includes(currentActionCodec)){
@@ -466,11 +501,10 @@ class DoViToolsMuxer {
             throw "Multilayer Dolby vision is unsupported";
         }
         this.fileActions = toLoadActions;
-        return actions;
     };
 
-    generatePresets(){
-        if (this.fileActions.length !== 1) return;
+    processActions(){
+        if (this.fileActions.length !== 1) return [];
         const primaryDoViStreamAction = this.fileActions[0];
         const [formatType, dolbyVisionProfile, dolbyVisionLevel] = primaryDoViStreamAction.get("formats").some(supportedFormats => supportedFormats[0] === "Dolby Vision");
         if (Number(dolbyVisionProfile) === 7){
@@ -478,6 +512,7 @@ class DoViToolsMuxer {
         } else{
             this.MKVExtractExtractor.executeAction(primaryDoViStreamAction);
         }
+        return [];
     }
 }
 
@@ -487,7 +522,7 @@ class MP4BoxPresetGenerator {
     transcoderInterface = null;
     doviMuxerInterface = null;
     fileMetaData = null;
-    actions = [];
+    fileActions = [];
 
     compatibleCodecs = new Map([
         ['mp4', [
@@ -518,19 +553,19 @@ class MP4BoxPresetGenerator {
 
 
     loadActions(actions){
-        this.fileActions = [...this.fileActions,actions];
+        this.fileActions = this.fileActions.concat(actions)
     };
 
 
     generatePresets(){
         if (!this.fileActions || !this.fileMetaData) return;
-        if(this.actions.filter(action => [Muxing.actionsEnum.DISCARD,Muxing.actionsEnum.EXTRACT].includes(action[0])).length === this.actions.length){
+        if(this.fileActions.filter(action => [Muxing.actionsEnum.DISCARD,Muxing.actionsEnum.EXTRACT].includes(action[0])).length === this.fileActions.length){
             "mp4box -rem 3 sample.mp4"
         }
         else{
-            this.doviMuxerInterface.loadActions(this.actions);
-            this.transcoderInterface.loadActions(this.actions);
-            this.extractorInterface.loadActions(this.actions);
+            this.doviMuxerInterface.loadActions(this.fileActions);
+            this.transcoderInterface.loadActions(this.fileActions);
+            this.extractorInterface.loadActions(this.fileActions);
         }
     }
 }
@@ -588,20 +623,220 @@ class FFMpegPresetGenerator {
     };
 
     loadActions(actions){
-        this.fileActions = [...this.fileActions,actions];
+        this.fileActions = this.fileActions.concat(actions);
     };
 
     generatePresets(){
         if (!this.fileActions || !this.fileMetaData) return;
+
+        this.doviMuxerInterface.loadActions(this.fileActions);
+        this.transcoderInterface.loadActions(this.fileActions);
+        this.extractorInterface.loadActions(this.fileActions);
+
+        return [
+            ...this.doviMuxerInterface.processActions(),
+            ...this.transcoderInterface.processActions(),
+            ...this.extractorInterface.processActions()
+        ];
     }
 }
 
 const plugin = (file, librarySettings, inputs, otherArguments) => {
     const lib = require('../methods/lib')();
+    const fs = require('fs')
     const path = require('path');
     inputs = lib.loadDefaultValues(inputs, details);
 
+    inputs.languageDictionary = new Map([
+        ['und', 'Unknown'],
+        ["abk", "Abkhazian"],
+        ["aar", "Afar"],
+        ["afr", "Afrikaans"],
+        ["aka", "Akan"],
+        ["sqi", "Albanian"],
+        ["amh", "Amharic"],
+        ["ara", "Arabic"],
+        ["arg", "Aragonese"],
+        ["hye", "Armenian"],
+        ["asm", "Assamese"],
+        ["ava", "Avaric"],
+        ["ave", "Avestan"],
+        ["aym", "Aymara"],
+        ["aze", "Azerbaijani"],
+        ["bam", "Bambara"],
+        ["bak", "Bashkir"],
+        ["eus", "Basque"],
+        ["bel", "Belarusian"],
+        ["ben", "Bengali"],
+        ["bis", "Bislama"],
+        ["bos", "Bosnian"],
+        ["bre", "Breton"],
+        ["bul", "Bulgarian"],
+        ["mya", "Burmese"],
+        ["cat", "Catalan"],
+        ["cha", "Chamorro"],
+        ["che", "Chechen"],
+        ["nya", "Chewa"],
+        ["zho", "Chinese"],
+        ["chu", "Slavonic"],
+        ["chv", "Chuvash"],
+        ["cor", "Cornish"],
+        ["cos", "Corsican"],
+        ["cre", "Cree"],
+        ["hrv", "Croatian"],
+        ["ces", "Czech"],
+        ["dan", "Danish"],
+        ["div", "Divehi"],
+        ["nld", "Dutch"],
+        ["dzo", "Dzongkha"],
+        ["eng", "English"],
+        ["epo", "Esperanto"],
+        ["est", "Estonian"],
+        ["ewe", "Ewe"],
+        ["fao", "Faroese"],
+        ["fij", "Fijian"],
+        ["fin", "Finnish"],
+        ["fra", "French"],
+        ["fry", "Western Frisian"],
+        ["ful", "Fulah"],
+        ["gla", "Gaelic"],
+        ["glg", "Galician"],
+        ["lug", "Ganda"],
+        ["kat", "Georgian"],
+        ["deu", "German"],
+        ["ell", "Greek"],
+        ["kal", "Kalaallisut"],
+        ["grn", "Guarani"],
+        ["guj", "Gujarati"],
+        ["hat", "Haitian"],
+        ["hau", "Hausa"],
+        ["heb", "Hebrew"],
+        ["her", "Herero"],
+        ["hin", "Hindi"],
+        ["hmo", "Hiri Motu"],
+        ["hun", "Hungarian"],
+        ["isl", "Icelandic"],
+        ["ido", "Ido"],
+        ["ibo", "Igbo"],
+        ["ind", "Indonesian"],
+        ["ina", "Interlingua"],
+        ["ile", "Interlingue"],
+        ["iku", "Inuktitut"],
+        ["ipk", "Inupiaq"],
+        ["gle", "Irish"],
+        ["ita", "Italian"],
+        ["jpn", "Japanese"],
+        ["jav", "Javanese"],
+        ["kan", "Kannada"],
+        ["kau", "Kanuri"],
+        ["kas", "Kashmiri"],
+        ["kaz", "Kazakh"],
+        ["khm", "Central Khmer"],
+        ["kik", "Kikuyu"],
+        ["kin", "Kinyarwanda"],
+        ["kir", "Kirghiz"],
+        ["kom", "Komi"],
+        ["kon", "Kongo"],
+        ["kor", "Korean"],
+        ["kua", "Kuanyama"],
+        ["kur", "Kurdish"],
+        ["lao", "Lao"],
+        ["lat", "Latin"],
+        ["lav", "Latvian"],
+        ["lim", "Limburgan"],
+        ["lin", "Lingala"],
+        ["lit", "Lithuanian"],
+        ["lub", "Luba-Katanga"],
+        ["ltz", "Luxembourgish"],
+        ["mkd", "Macedonian"],
+        ["mlg", "Malagasy"],
+        ["msa", "Malay"],
+        ["mal", "Malayalam"],
+        ["mlt", "Maltese"],
+        ["glv", "Manx"],
+        ["mri", "Maori"],
+        ["mar", "Marathi"],
+        ["mah", "Marshallese"],
+        ["mon", "Mongolian"],
+        ["nau", "Nauru"],
+        ["nav", "Navajo"],
+        ["nde", "North Ndebele"],
+        ["nbl", "South Ndebele"],
+        ["ndo", "Ndonga"],
+        ["nep", "Nepali"],
+        ["nor", "Norwegian"],
+        ["nob", "Norwegian Bokmål"],
+        ["nno", "Norwegian Nynorsk"],
+        ["oci", "Occitan"],
+        ["oji", "Ojibwa"],
+        ["ori", "Oriya"],
+        ["orm", "Oromo"],
+        ["oss", "Ossetian"],
+        ["pli", "Pali"],
+        ["pus", "Pashto"],
+        ["fas", "Persian"],
+        ["pol", "Polish"],
+        ["por", "Portuguese"],
+        ["pan", "Punjabi"],
+        ["que", "Quechua"],
+        ["ron", "Romanian"],
+        ["roh", "Romansh"],
+        ["run", "Rundi"],
+        ["rus", "Russian"],
+        ["sme", "Northern Sami"],
+        ["smo", "Samoan"],
+        ["sag", "Sango"],
+        ["san", "Sanskrit"],
+        ["srd", "Sardinian"],
+        ["srp", "Serbian"],
+        ["sna", "Shona"],
+        ["snd", "Sindhi"],
+        ["sin", "Sinhala"],
+        ["slk", "Slovak"],
+        ["slv", "Slovenian"],
+        ["som", "Somali"],
+        ["sot", "Southern Sotho"],
+        ["spa", "Spanish"],
+        ["sun", "Sundanese"],
+        ["swa", "Swahili"],
+        ["ssw", "Swati"],
+        ["swe", "Swedish"],
+        ["tgl", "Tagalog"],
+        ["tah", "Tahitian"],
+        ["tgk", "Tajik"],
+        ["tam", "Tamil"],
+        ["tat", "Tatar"],
+        ["tel", "Telugu"],
+        ["tha", "Thai"],
+        ["bod", "Tibetan"],
+        ["tir", "Tigrinya"],
+        ["ton", "Tonga"],
+        ["tso", "Tsonga"],
+        ["tsn", "Tswana"],
+        ["tur", "Turkish"],
+        ["tuk", "Turkmen"],
+        ["twi", "Twi"],
+        ["uig", "Uighur"],
+        ["ukr", "Ukrainian"],
+        ["urd", "Urdu"],
+        ["uzb", "Uzbek"],
+        ["ven", "Venda"],
+        ["vie", "Vietnamese"],
+        ["vol", "Volapük"],
+        ["wln", "Walloon"],
+        ["cym", "Welsh"],
+        ["wol", "Wolof"],
+        ["xho", "Xhosa"],
+        ["iii", "Sichuan Yi"],
+        ["yid", "Yiddish"],
+        ["yor", "Yoruba"],
+        ["zha", "Zhuang"],
+        ["zul", "Zulu"]
+    ]);
+
     inputs.upgradeableCodecs = ["vc1","mpeg4","h264"];
+
+    inputs.atmosCapableCodecs = ["truehd","eac3"];
 
     inputs.filterableSubtitleCodecs = ["subrip","mov_text"];
 
@@ -631,12 +866,19 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return [filePath, fileName, baseFileName, fileExtension];
     }
 
-    const pathVars = new Map([
+
+    let pathVars = [
         ["ffmpeg", otherArguments.ffmpegPath],
         ["mkvextract", otherArguments.mkvpropeditPath?.replace("mkvpropedit","mkvextract")],
         ["dovitool", "C:/Tdarr/DoviTool/dovi_tool.exe"],
         ["mp4box", "C:/Program Files/GPAC/mp4box.exe"],
-    ])
+    ];
+    const possibleFdkFFmpegDirectory = otherArguments.ffmpegPath.replace("/ffmpeg/","/ffmpeg-fdk/");
+    if (fs.existsSync(possibleFdkFFmpegDirectory)){
+        pathVars.push(["ffmpegfdk",possibleFdkFFmpegDirectory])
+    }
+    pathVars = new Map(pathVars);
+    console.log(pathVars);
 
     let response = {
         processFile: false,
@@ -725,15 +967,57 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             if (doviTargetContainerType === "Original"){
                 return originalContainer;
             }
-            return `.${doviTargetContainerType.toLowerCase()}`;
+            return `${doviTargetContainerType.toLowerCase()}`;
         }
         if (inputs.target_container_type === "MKV"){
-            return ".mkv";
+            return "mkv";
         }
         if (inputs.target_container_type === "MP4"){
-            return ".mp4";
+            return "mp4";
         }
         return originalContainer;
+    }
+
+    function writeNewTitlesForActions(actions){
+        return actions.map(currentAction => {
+            let newActionTitle = "";
+            switch (currentAction[1].get("type")){
+                case "v":
+                    break;
+                case "a":
+                    newActionTitle = generateAudioTrackTitle(
+                        inputs,
+                        getModifiedActionValue(currentAction,"codec"),
+                        getModifiedActionValue(currentAction,"formats")[1],
+                        currentAction[1].get("language"),
+                        currentAction[1].get("title")
+                    );
+                    break;
+                case "s":
+                    newActionTitle = generateSubtitleTrackTitle(
+                        inputs,
+                        getModifiedActionValue(currentAction,"codec"),
+                        getModifiedActionValue(currentAction,"formats"),
+                        currentAction[1].get("language"),
+                        currentAction[1].get("title")
+                    );
+                    break;
+                default:
+                    break;
+            }
+            if (newActionTitle !== "" || currentAction[1].get("title")){
+                if (currentAction.hasOwnProperty(2)){
+                    const currentActionModifications = currentAction[2];
+                    currentActionModifications.set("title",newActionTitle);
+                    currentAction[2] = currentActionModifications;
+                } else{
+                    currentAction[2] = new Map([
+                        ["title", newActionTitle]
+                    ]);
+                }
+            }
+            return currentAction;
+        })
     }
 
     function getStreamSpecialVideoFormats(videoStreamId,currentStream){
@@ -806,19 +1090,22 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     currentStreamAction = Muxing.actionsEnum.COPYDOVI
                 } else{
                     currentStreamAction = Muxing.actionsEnum.COPY
-                    if (inputs.upgrade_legacy_video && inputs.upgradeableCodecs.includes(currentStreamCodec)){
+                    if (inputs.upgrade_legacy_video && inputs.upgradeableCodecs.includes(currentStreamCodec) && videoTranscoderInterface.decodeableCodecs.get(currentStreamCodec)){
                         currentStreamAction = Muxing.actionsEnum.MODIFY;
                         currentStreamActionModifications = new Map([["codec","hevc"]])
+                        currentStreamActionModifications.set("codec","hevc");
                     }
                 }
             }
-            if(currentStreamActionModifications){
+            if (currentStreamActionModifications){
                 videoActions.push([currentStreamAction, currentStreamActionFormat,currentStreamActionModifications]);
             } else{
                 videoActions.push([currentStreamAction, currentStreamActionFormat]);
             }
             videoStreamsId++;
         });
+        videoActions = writeNewTitlesForActions(videoActions);
+
         return videoActions;
     }
 
@@ -832,41 +1119,39 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         return "";
     }
 
-    function generateAudioTrackTitle(codec,channelLayout,language,originalTitle){
+    function generateAudioTrackTitle(inputs,codec,channelLayout,language,originalTitle){
         if (Number.isInteger(channelLayout)){
             channelLayout = parseChannelsToChannelLayout(channelLayout);
         }
 
         const IsAtmosTrack = originalTitle.toLowerCase().includes("atmos");
-        const languageCode = language.toLowerCase().substring(0, 2)
-        const languageDictionary = new Map([
-            ['en', 'English'],
-            ['nl', 'Dutch'],
-            ['un', 'Unknown']
-        ]);
-
-        const codecDictionary = new Map([
-            ['aac:LC', 'AAC'],
-            ['ac3', 'Dolby Digital'],
-            ['eac3', 'Dolby Digital+'],
-            ['truehd', 'Dolby TrueHD'],
-            ['dts:DTS-HD MA', 'DTS-HD Master Audio'],
-            ['dts:DTS-HD', 'DTS-HD'],
-            ['dts:DTS', 'DTS'],
-            ['opus', 'Opus'],
-        ]);
-
+        const languageCode = language.toLowerCase().substring(0, 3)
         let languageName = capitalizeFirstLetter(language);
-        if (languageDictionary.has(languageCode)){
-            languageName = languageDictionary.get(languageCode);
+        if (inputs.languageDictionary.has(languageCode)){
+            languageName = inputs.languageDictionary.get(languageCode);
         }
 
         let codecName = capitalizeFirstLetter(codec);
-        if (codecDictionary.has(codec)){
-            codecName = codecDictionary.get(codec);
+        if (parseCodecToCodecName(codec)){
+            codecName = parseCodecToCodecName(codec);
         }
 
-        return `${languageName} - ${codecName}${IsAtmosTrack? " Atmos" : ""}${channelLayout ? ` ${channelLayout}` : ""}`;
+        return `${languageName} - ${codecName}${IsAtmosTrack && inputs.atmosCapableCodecs.includes(codec) ? " Atmos" : ""}${channelLayout ? ` ${channelLayout}` : ""}`;
+    }
+
+    function generateSubtitleTrackTitle(inputs,codec,formats,language,originalTitle){
+        const languageCode = language.toLowerCase().substring(0, 3);
+        let languageName = capitalizeFirstLetter(language);
+        if (inputs.languageDictionary.has(languageCode)){
+            languageName = inputs.languageDictionary.get(languageCode);
+        }
+
+        let codecName = capitalizeFirstLetter(codec);
+        if (parseCodecToCodecName(codec)){
+            codecName = parseCodecToCodecName(codec);
+        }
+
+        return `${languageName} - ${codecName}${formats.includes("forced") ? " Forced" : ""}${formats.includes("commentary") ? " Commentary" : ""}`;
     }
 
     function sortAudioStreamsOnQuality(audioActions){
@@ -988,7 +1273,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             }
         }
 
-
         audioActions = sortAudioStreamsOnQuality(audioActions);
 
 
@@ -1021,9 +1305,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     if (possibleTargetTrack && (possibleTargetTrack[1].get("bitrate") >= currentBitratePerChannel * codecLimitMaxChannels)){
                         return [Muxing.actionsEnum.DISCARD, currentActionFormat];
                     } else{
-                        currentActionAudioFormats[0] = codecLimitMaxChannels;
-                        currentActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
-                        return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
+                        const newActionAudioFormats = currentActionAudioFormats;
+                        newActionAudioFormats[0] = codecLimitMaxChannels;
+                        newActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
+                        return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",newActionAudioFormats]])];
                     }
                 }
 
@@ -1046,7 +1331,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     }
                 }
 
-                if (!inputs.allowSevenChannelAudio && currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1")){
+                if (!inputs.allowSevenChannelAudio && (currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1"))){
                     currentActionAudioFormats[0] = 6;
                     currentActionAudioFormats[1] = "5.1";
                     return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
@@ -1062,6 +1347,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             return null;
         }).filter((language) => language !== null))];
 
+
         const bestAudioStreamsPerLanguage = keptAudioStreamLanguages.map(language => {
             return audioActions.find(audioStream => audioStream[0] !== Muxing.actionsEnum.DISCARD && audioStream[1].get("language") === language && videoTranscoderInterface.decodeableCodecs.get(audioStream[1].get("codec")));
         })
@@ -1071,58 +1357,43 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 response.infoLog += `Tried adding extra audio tracks for ${bestAudioStreamPerLanguage[1].get("language")} however, no transcodeable source track could be found. \n`;
                 return
             }
+
+            const bestAudioStreamLanguage = bestAudioStreamPerLanguage[1].get("language");
             const bestAudioStreamFormats = bestAudioStreamPerLanguage[1].get("formats");
-            const bestAudioStreamChannels = bestAudioStreamFormats[0];
             const bestAudioStreamBitrate = bestAudioStreamPerLanguage[1].get("bitrate");
 
             inputs.targetAudioCodecs.forEach((targetCodec) => {
-                const doesAudioAlreadyExists = audioActions.find(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec"));
+                const doesAudioAlreadyExists = audioActions.find(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec") && selectedAudioStream[1].get("language") === bestAudioStreamLanguage);
                 if (!doesAudioAlreadyExists){
-                    let newAudioStreamCodec = targetCodec.get("targetCodec");
-                    const newAudioStreamBitrate = targetCodec.get("targetBitrate");
+                    let targetCodecCodec = targetCodec.get("targetCodec");
+                    const targetCodecBitrate = targetCodec.get("targetBitrate");
+                    const targetCodecChannels = targetCodec.get("targetChannels");
+                    const newAudioStreamFormats = [...bestAudioStreamFormats];
 
-                    if (bestAudioStreamBitrate > newAudioStreamBitrate || bestAudioStreamBitrate === 0){
-                        let newAudioStreamFormats = bestAudioStreamFormats;
-                        if (bestAudioStreamChannels < targetCodec.get("targetChannels")){
-                            newAudioStreamFormats[0] = bestAudioStreamChannels;
-                            newAudioStreamFormats[1] = parseChannelsToChannelLayout(bestAudioStreamChannels);
+                    if (bestAudioStreamBitrate >= targetCodecBitrate || bestAudioStreamBitrate === 0){
+                        if (newAudioStreamFormats[0] > targetCodecChannels){
+                            newAudioStreamFormats[0] = targetCodecChannels;
+                            newAudioStreamFormats[1] = parseChannelsToChannelLayout(targetCodecChannels);
                         }
+
                         audioActions.push([
                             Muxing.actionsEnum.CREATE,
                             bestAudioStreamPerLanguage[1],
                             new Map([
-                                ["codec", newAudioStreamCodec],
-                                ["bitrate", newAudioStreamBitrate],
+                                ["codec", targetCodecCodec],
+                                ["bitrate", targetCodecBitrate],
                                 ["title", ""],
                                 ["defaultStream", false],
                                 ["formats", newAudioStreamFormats]
                             ])
                         ]);
-                        response.infoLog += `Created new ${newAudioStreamCodec} ${newAudioStreamFormats[1]} track \n`;
+                        response.infoLog += `Created new ${targetCodecCodec} ${newAudioStreamFormats[1]} track \n`;
                     }
                 }
             });
         })
 
-        // Set new AudioTrack title
-        audioActions = audioActions.map(currentAction => {
-            const newActionTitle = generateAudioTrackTitle(
-                getModifiedActionValue(currentAction,"codec"),
-                getModifiedActionValue(currentAction,"formats")[1],
-                currentAction[1].get("language"),
-                currentAction[1].get("title")
-            );
-            if (currentAction.hasOwnProperty(2)){
-                const currentActionModifications = currentAction[2];
-                currentActionModifications.set("title",newActionTitle);
-                currentAction[2] = currentActionModifications;
-            } else{
-                currentAction[2] = new Map([
-                    ["title", newActionTitle]
-                ]);
-            }
-            return currentAction;
-        })
+        audioActions = writeNewTitlesForActions(audioActions);
 
         audioActions = sortAudioStreamsOnQuality(audioActions);
         return audioActions;
@@ -1181,6 +1452,8 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             return indexA - indexB;
         })
 
+        subtitleActions = writeNewTitlesForActions(subtitleActions);
+
         return subtitleActions;
     }
 
@@ -1212,7 +1485,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         ['complete', originalFile],
     ]);
 
-    let videoTranscoderInterface = new FFMpegTranscoder(pathVars);
+    let videoTranscoderInterface = new FFMpegTranscoder(pathVars,originalFileDetails,cacheFileDirectory);
 
     const videoStreamActions = generateVideoStreamActions(inputs, videoTranscoderInterface);
     const audioStreamActions = generateAudioStreamActions(inputs, videoTranscoderInterface);
@@ -1261,10 +1534,26 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     ]));
 
     videoPresetGeneratorInterface.loadActions([...videoStreamActions,...audioStreamActions,...subtitleStreamActions]);
-    console.log(videoPresetGeneratorInterface.generatePresets());
+    const presets = videoPresetGeneratorInterface.generatePresets();
 
-    const fs = require('fs')
+    function stringifyYAML(obj, indent = 0) {
+        const spaces = '  '.repeat(indent);
+        if (Array.isArray(obj)) {
+            return obj.map(item => `${spaces}- ${stringifyYAML(item, indent + 1).trimStart()}`).join('\n');
+        } else if (typeof obj === 'object' && obj !== null) {
+            return Object.keys(obj).map(key => {
+                const value = stringifyYAML(obj[key], indent + 1).trimStart();
+                return `${spaces}${key}: ${value.includes('\n') ? '\n' + value : value}`;
+            }).join('\n');
+        } else {
+            return `${spaces}${obj}`;
+        }
+    }
+
     fs.writeFileSync(`${originalFileDirectory}/file.json`, JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
+    fs.writeFileSync(`${originalFileDirectory}/presets.yaml`, stringifyYAML([`mkdir "${cacheFileDirectory}"`,...presets.map(preset => Array.from(preset))]));
+
+
 
     if (!doesFileContainDoVi && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
         response.infoLog += `☒ File says it includes Dolby Vision, However no DoVi Metadata could be found. \n`;
