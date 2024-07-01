@@ -246,7 +246,7 @@ function parseCodecToCodecName(codecName){
 }
 
 function getModifiedActionValue(action,property, noFallback = false){
-    if (action.hasOwnProperty(2) && action[2].get(property)){
+    if (action.hasOwnProperty(2) && action[2].has(property)){
         return action[2].get(property);
     }
     if (!noFallback){
@@ -269,10 +269,10 @@ class MKVExtractExtractor {
 
     loadActions(actions){
         const toLoadActions = [];
-        actions.forEach(action => {
+        actions.forEach((action, index) => {
             const [actionType, actionData, actionModifications] = action;
             if (![Muxing.actionsEnum.EXTRACT].includes(actionType)) return;
-            toLoadActions.push(action);
+            toLoadActions[index] = action;
         })
         this.fileActions = toLoadActions;
         return actions;
@@ -280,7 +280,7 @@ class MKVExtractExtractor {
 
     processActions(){
         return this.fileActions.map(action => {
-            return this.executeAction(action);
+            return action ? this.executeAction(action) : action;
         })
     }
 
@@ -308,17 +308,17 @@ class MP4BoxExtractor {
 
     loadActions(actions){
         const toLoadActions = [];
-        actions.forEach(action => {
+        actions.forEach((action, index) => {
             const [actionType, actionData, actionModifications] = action;
             if (![Muxing.actionsEnum.EXTRACT].includes(actionType)) return;
-            toLoadActions.push(action);
+            toLoadActions[index] = action;
         })
         this.fileActions = toLoadActions;
     }
 
     processActions(){
         return this.fileActions.map(action => {
-            return this.executeAction(action);
+            return action ? this.executeAction(action) : action;
         })
     }
 
@@ -407,7 +407,7 @@ class FFMpegTranscoder{
 
     loadActions(actions){
         const toLoadActions = [];
-        actions.forEach(action => {
+        actions.forEach((action, index) => {
             const [actionType, actionData, actionModifications] = action;
             if (![Muxing.actionsEnum.CREATE,Muxing.actionsEnum.MODIFY].includes(actionType)) return;
             const decodingCodec = this.decodeableCodecs.get(actionData.get("codec"));
@@ -422,7 +422,7 @@ class FFMpegTranscoder{
             if(encodingCodec === undefined) error.push(`Failed to load action, failed to determine encoder support for codec: ${encodingCodec}`);
             if(encodingCodec === false) error.push(`Failed to load action, FFMpeg has no encoder for codec: ${decodingCodec}`);
             if (error.length > 0) throw error.join(" ");
-            toLoadActions.push(action);
+            toLoadActions[index] = action;
         })
         this.fileActions = toLoadActions;
     }
@@ -442,8 +442,10 @@ class FFMpegTranscoder{
 
         switch (action[1].get("type")){
             case "v":
+                const newActionFormats = getModifiedActionValue(action,"formats", true);
+                const newPixelFormat = newActionFormats && newActionFormats[0][0].includes("10le") ? "p010le" : null;
                 preset = (mappedStreamId = 0) => [
-                    `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -an `} -map 0:v:${action[1].get("typeStreamId")} -c:v:${mappedStreamId} hevc_nvenc -tune hq -preset p7 -cq 16 ${ffmpegOnlyModeDisabled && ` -strict unofficial "${exportFile}"`}`,
+                    `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -an `} -map 0:v:${action[1].get("typeStreamId")} -c:v:${mappedStreamId} hevc_nvenc ${newPixelFormat && `-pix_fmt ${newPixelFormat}`}  -rc vbr -tune hq -preset p7 -cq 2 ${ffmpegOnlyModeDisabled && ` -strict unofficial "${exportFile}"`}`,
                     this.ffmpegOnlyMode ? null : exportFile
                 ];
                 break
@@ -502,7 +504,7 @@ class DoViToolsMuxer {
 
     loadActions(actions){
         const toLoadActions = [];
-        actions.forEach(action => {
+        actions.forEach((action, index) => {
             const [actionType, actionData, actionModifications] = action;
             if (![Muxing.actionsEnum.COPYDOVI].includes(actionType)) return;
             const currentActionCodec = actionData.get("codec");
@@ -512,22 +514,24 @@ class DoViToolsMuxer {
             if (!this.compatibleCodecs.includes(currentActionCodec)){
                 throw `Dolby Vision in codec: ${currentActionCodec} is unsupported`;
             }
-            toLoadActions.push(action);
+            toLoadActions[index] = action;
         });
-        if (toLoadActions.length > 1){
+        if (toLoadActions.filter(action => action[0] === Muxing.actionsEnum.COPYDOVI).length > 1){
             throw "Multilayer Dolby vision is unsupported";
         }
         this.fileActions = toLoadActions;
     };
 
     processActions(){
-        if (this.fileActions.length !== 1) return [];
-        const primaryDoViStreamAction = this.fileActions[0];
-        const [formatType, dolbyVisionProfile, dolbyVisionLevel] = primaryDoViStreamAction.get("formats").some(supportedFormats => supportedFormats[0] === "Dolby Vision");
-        if (Number(dolbyVisionProfile) === 7){
-            this.FFMpegTranscoder.exportToRawHevc(primaryDoViStreamAction);
-        } else{
-            this.MKVExtractExtractor.executeAction(primaryDoViStreamAction);
+        const firstStreamIndex = this.fileActions.findIndex(action => action && action[0] === Muxing.actionsEnum.COPYDOVI);
+        if (firstStreamIndex >= 0){
+            const primaryDoViStreamAction = this.fileActions[firstStreamIndex];
+            const [formatType, dolbyVisionProfile, dolbyVisionLevel] = primaryDoViStreamAction.get("formats").some(supportedFormats => supportedFormats[0] === "Dolby Vision");
+            if (Number(dolbyVisionProfile) === 7){
+                this.FFMpegTranscoder.exportToRawHevc(primaryDoViStreamAction);
+            } else{
+                this.MKVExtractExtractor.executeAction(primaryDoViStreamAction);
+            }
         }
         return [];
     }
@@ -575,7 +579,7 @@ class MP4BoxPresetGenerator {
     };
 
     loadActions(actions){
-        this.fileActions = this.fileActions.concat(actions)
+        this.fileActions = actions
     };
 
     generatePresets(){
@@ -621,7 +625,7 @@ class FFMpegPresetGenerator {
         ])]
     ]);
 
-    constructor(pathVars,extractorInterface,transcoderInterface,doviMuxerInterface) {
+    constructor(pathVars, extractorInterface, transcoderInterface, doviMuxerInterface) {
         this.programPath = pathVars.get("ffmpeg");
         this.extractorInterface = extractorInterface;
         this.transcoderInterface = transcoderInterface;
@@ -634,7 +638,7 @@ class FFMpegPresetGenerator {
 
     loadActions(actions){
         const currentContainerSupportedCodecs = this.containerCodecs.get(this.fileMetaData.get("targetContainerType"));
-        actions = actions.map(action => {
+        actions = actions.map((action, index) => {
             const [actionType, actionData, actionModifications] = action;
             if ([Muxing.actionsEnum.DISCARD].includes(actionType)) return action;
             const originalCodec = action[1].get("codec");
@@ -660,12 +664,14 @@ class FFMpegPresetGenerator {
             return action;
         })
 
-        this.fileActions = this.fileActions.concat(actions);
+        this.fileActions = actions;
     };
 
     processCopyActions(){
-        return this.fileActions.filter(action => action[0] === Muxing.actionsEnum.COPY).map(copyAction => {
-            let preset = () => {};
+        const copyPresetActions = [];
+        this.fileActions.forEach((copyAction, index) => {
+            if (copyAction[0] !== Muxing.actionsEnum.COPY) return;
+            let preset = null;
             switch (this.fileMetaData.get("presetProgram")) {
                 case ".mkv.mkv":
                     preset = (mappedStreamId = 0) => [
@@ -679,12 +685,12 @@ class FFMpegPresetGenerator {
                 default:
                     throw "No program found for current and target container type";
             }
-
-            return new Map([
+            copyPresetActions[index] = new Map([
                 ["action", copyAction],
-                ["preset", () => [preset, file]],
+                ["preset", preset],
             ]);
-        })
+        });
+        return copyPresetActions;
     }
 
 
@@ -695,19 +701,17 @@ class FFMpegPresetGenerator {
         this.transcoderInterface.loadActions(this.fileActions);
         this.extractorInterface.loadActions(this.fileActions);
 
-        const processedActionsData = [
-            ...this.processCopyActions(),
-            ...this.doviMuxerInterface.processActions(),
-            ...this.transcoderInterface.processActions(),
-            ...this.extractorInterface.processActions()
-        ];
-        console.log(processedActionsData)
-        const rawPresets = processedActionsData.map(processedAction => [
+        let processedActionsData = [];
+        this.processCopyActions().forEach((action, index) => action ? processedActionsData[index] = action : null);
+        this.doviMuxerInterface.processActions().forEach((action, index) => action ? processedActionsData[index] = action : null);
+        this.transcoderInterface.processActions().forEach((action, index) => action ? processedActionsData[index] = action : null);
+        this.extractorInterface.processActions().forEach((action, index) => action ? processedActionsData[index] = action : null);
+
+        console.log(processedActionsData.map(processedAction => [
             processedAction.get("action"),
             processedAction.get("preset")(),
-        ]);
-        //here container preset builder
-        console.log(rawPresets);
+        ]));
+
         let childPresets = [];
         let mainPreset = "";
         switch (this.fileMetaData.get("presetProgram")){
@@ -731,19 +735,22 @@ class FFMpegPresetGenerator {
 
                     mappedIds.set(currentPresetActionType, mappedIds.get(currentPresetActionType) + 1);
                     const [presetActionPreset, presetActionPresetFile] = presetActionRawPreset(mappedIds.get(currentPresetActionType));
+                    const newActionTitle = getModifiedActionValue(presetAction,"title");
+                    const metaDataPresetPart = `-disposition:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} ${getModifiedActionValue(presetAction,"default") ? "default" : 0} ${newActionTitle && `-metadata:s:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} title="${newActionTitle}"`} -metadata:s:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} language=${presetActionDetails.get("language")}`;
                     if (presetActionPresetFile !== null){
                         childPresets.push(presetActionPreset);
                         externalFiles.push(presetActionPresetFile);
-                        containerPresetParts.push(`-map ${getMappedExternalFileId()}:${currentPresetActionType}:0 -c:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} copy`)
+                        containerPresetParts.push(`-map ${getMappedExternalFileId()}:${currentPresetActionType}:0 -c:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} copy ${metaDataPresetPart}`);
                     } else{
-                        containerPresetParts.push(presetActionPreset);
+                        containerPresetParts.push(`${presetActionPreset} ${metaDataPresetPart}`);
                     }
                 })
 
                 const originalFile = this.fileMetaData.get("originalFile");
+                const fileTitle = this.fileMetaData.get("fileTitle");
                 const newFileName = `${originalFile.get("directory")}${originalFile.get("baseName")}-transcoded.${originalFile.get("extension")}`;
-                mainPreset = `${programPath} ${externalFiles.map(externalFile => `-i "${externalFile}"`).join(" ")} ${containerPresetParts.join(" ")} -strict unofficial "${newFileName}"`;
-                console.log(containerPresetParts);
+
+                mainPreset = `${programPath} ${externalFiles.map(externalFile => `-i "${externalFile}"`).join(" ")} ${fileTitle ? `-metadata title="${fileTitle} " ` : ""}-map_chapters -1 ${containerPresetParts.join(" ")} -strict unofficial "${newFileName}"`;
                 break;
             case ".mp4.mkv":
 
@@ -993,7 +1000,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         pathVars.push(["ffmpegfdk",possibleFdkFFmpegDirectory])
     }
     pathVars = new Map(pathVars);
-    console.log(pathVars);
 
     let response = {
         processFile: false,
@@ -1136,7 +1142,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     function getStreamSpecialVideoFormats(videoStreamId,currentStream){
-        const currentStreamVideoFormats = [];
+        const currentStreamVideoFormats = [[currentStream.pix_fmt]];
         if (currentStream.side_data_list && Array.isArray(currentStream.side_data_list)) {
             currentStream.side_data_list.forEach(sideData => {
                 let sideDataType = sideData.side_data_type ?? "";
@@ -1182,6 +1188,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const currentStreamBitRate = currentStream?.bit_rate ? Number(currentStream?.bit_rate) :  0;
             const currentStreamTitle = currentStream?.tags?.title?.toLowerCase() ?? "";
             const removeCurrentStream = toRemoveVideoCodecs.includes(currentStreamCodec);
+
             if (removeCurrentStream) {
                 response.infoLog += `☒Video stream 0:v:${videoStreamsId} detected as being ${currentStreamCodec}, removing. \n`;
             }
@@ -1207,8 +1214,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     currentStreamAction = Muxing.actionsEnum.COPY
                     if (inputs.upgrade_legacy_video && inputs.upgradeableCodecs.includes(currentStreamCodec) && videoTranscoderInterface.decodeableCodecs.get(currentStreamCodec)){
                         currentStreamAction = Muxing.actionsEnum.MODIFY;
-                        currentStreamActionModifications = new Map([["codec","hevc"]])
-                        currentStreamActionModifications.set("codec","hevc");
+                        const currentPixelFormat = currentStreamSpecialFormats[0][0];
+                        let currentStreamModifications = [["codec","hevc"]];
+                        if(["yuv420p","yuv422p","yuv444p"].includes(currentPixelFormat)) currentStreamModifications.push(["formats", [[`${currentPixelFormat}10le`]]])
+                        currentStreamActionModifications = new Map(currentStreamModifications);
                     }
                 }
             }
@@ -1498,7 +1507,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                                 ["codec", targetCodecCodec],
                                 ["bitrate", targetCodecBitrate],
                                 ["title", ""],
-                                ["defaultStream", false],
+                                ["default", false],
                                 ["formats", newAudioStreamFormats]
                             ])
                         ]);
@@ -1637,12 +1646,12 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             break;
     }
 
-    console.log([
-        ["fileTitle",newFileTitle],
-        ["currentContainerType",currentContainerType],
-        ["targetContainerType",targetContainerType]
-    ])
-    console.log([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].filter(item => item[0] !== Muxing.actionsEnum.DISCARD));
+    // console.log([
+    //     ["fileTitle",newFileTitle],
+    //     ["currentContainerType",currentContainerType],
+    //     ["targetContainerType",targetContainerType]
+    // ])
+    // console.log([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].filter(item => item[0] !== Muxing.actionsEnum.DISCARD));
 
     videoPresetGeneratorInterface.loadFileMetaData(new Map([
         ["fileTitle", newFileTitle],
