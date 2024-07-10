@@ -856,7 +856,8 @@ class FFMpegPresetGenerator {
                     mappedIds.set(currentPresetActionType, mappedIds.get(currentPresetActionType) + 1);
                     const [presetActionPreset, presetActionPresetFile] = presetActionRawPreset(mappedIds.get(currentPresetActionType));
                     const newActionTitle = getModifiedActionValue(presetAction,"title");
-                    const metaDataPresetPart = `-disposition:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} ${getModifiedActionValue(presetAction,"default") ? "default" : 0} ${newActionTitle && `-metadata:s:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} title="${newActionTitle}"`} -metadata:s:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} language=${presetActionDetails.get("language")}`;
+                    const dispositionValue = getModifiedActionValue(presetAction, "formats").includes("forced") ? "forced" : (getModifiedActionValue(presetAction,"default") ? "default" : 0);
+                    const metaDataPresetPart = `-disposition:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} ${dispositionValue} ${newActionTitle && `-metadata:s:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} title="${newActionTitle}"`} -metadata:s:${currentPresetActionType}:${mappedIds.get(currentPresetActionType)} language=${presetActionDetails.get("language")}`;
                     if (presetActionPresetFile !== null){
                         if (Array.isArray(presetActionPreset)){
                             presetActionPreset.forEach(presetPart => childPresets.push(presetPart));
@@ -957,7 +958,7 @@ function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType
         if (sequence[1])
             newFileSequences.push(`${index + 1}\n${sequence[0]}\n${sequence[1].join("\n")}\n\n`);
     })
-    fs.writeFileSync(newFilePath, newFileSequences.join(""), 'utf8');
+    fs.writeFileSync(newFilePath, newFileSequences.join(""));
     console.info(`Subtitle file rewritten successfully to: ${newFilePath}`)
 }
 
@@ -1924,14 +1925,16 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             break;
     }
 
-    console.log(`Found preset for ${originalFileDetails.get("name")}: `,presets);
+    console.info(`Found preset for ${originalFileDetails.get("name")}: `,presets);
     presets.forEach((preset,index) => {
-        console.log(`Start executing task(${index + 1}/${presets.length}), Task preset:`, preset);
+        console.info(`Start executing task(${index + 1}/${presets.length}), Task preset:`);
+        console.info(preset)
         const presetOutput = execSync(preset).toString();
-        console.log(`Finished executing task(${index + 1}/${presets.length}), Task output:`, presetOutput);
+        console.info(`Finished executing task(${index + 1}/${presets.length}), Task output:`);
+        console.info(presetOutput);
         response[`preset${index}Log`] = presetOutput;
     })
-    console.log("Finished all Tasks!");
+    console.info("Finished all Tasks!");
 
     return response
 
