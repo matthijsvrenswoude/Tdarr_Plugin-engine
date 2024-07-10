@@ -1456,7 +1456,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         const languageCode = language.toLowerCase().substring(0, 3);
         let languageName = capitalizeFirstLetter(language);
         if (languageDictionary.has(languageCode)){
-            console.log(languageDictionary.get(languageCode)[1]);
             languageName = languageDictionary.get(languageCode)[1];
         }
 
@@ -1746,7 +1745,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
             let currentStreamAction = Muxing.actionsEnum.DISCARD;
             if(keepCurrentStream){
-                console.log(inputs.cleanup_text_subtitles)
                 if (inputs.cleanup_text_subtitles && inputs.rewriteableSubtitleCodecs.includes(currentStreamCodec)){
                     currentStreamAction = Muxing.actionsEnum.REWRITE;
                 } else{
