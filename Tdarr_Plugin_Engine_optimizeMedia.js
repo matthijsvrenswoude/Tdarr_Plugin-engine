@@ -462,6 +462,7 @@ class FFMpegTranscoder{
         ["h264", true],
         ["hevc", true],
         ["mpeg4", true],
+        ["mpeg2video", true],
         ["vc1", true],
         ["av1", true],
         ["dts:DTS-HD MA", true],
@@ -482,6 +483,7 @@ class FFMpegTranscoder{
         ["h264", true],
         ["hevc", true],
         ["mpeg4", true],
+        ["mpeg2video", true],
         ["vc1", false],
         ["av1", true],
         ["dts:DTS-HD MA", false],
@@ -799,7 +801,7 @@ class FFMpegPresetGenerator {
             switch (this.fileMetaData.get("presetProgram")) {
                 case ".mkv.mkv":
                     preset = (mappedStreamId = 0) => [
-                        `-map 0:${copyAction[1].get("type")}:${mappedStreamId} -c:a:${mappedStreamId} copy`,
+                        `-map 0:${copyAction[1].get("type")}:${mappedStreamId} -c:${copyAction[1].get("type")}:${mappedStreamId} copy`,
                         null
                     ];
                     break;
@@ -872,10 +874,10 @@ class FFMpegPresetGenerator {
                 });
 
                 const fileTitle = this.fileMetaData.get("fileTitle");
-                const originalFile = this.fileMetaData.get("originalFile");
-                const newFileName = `${originalFile.get("directory")}${originalFile.get("baseName")}-transcoded.${originalFile.get("extension")}`;
-
-                mainPreset = `${programPath} ${externalFiles.map(externalFile => `-i "${externalFile}"`).join(" ")} ${fileTitle ? `-metadata title="${fileTitle} " ` : ""}-map_chapters -1 ${containerPresetParts.join(" ")} -strict unofficial -y "${newFileName}"`;
+                // const originalFile = this.fileMetaData.get("originalFile");
+                // const newFileName = `${originalFile.get("directory")}${originalFile.get("baseName")}-transcoded.${originalFile.get("extension")}`;
+                //"${newFileName}"
+                mainPreset = `, ${externalFiles.slice(1).map(externalFile => `-i "${externalFile}"`).join(" ")} ${fileTitle ? `-metadata title="${fileTitle} " ` : ""}-map_chapters -1 ${containerPresetParts.join(" ")} -strict unofficial -y `;
                 break;
             case ".mp4.mkv":
 
@@ -1142,7 +1144,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     inputs = lib.loadDefaultValues(inputs, details);
     const languageDictionary = getLanguageDictionary();
 
-    inputs.upgradeableVideoCodecs = ["vc1","mpeg4","h264"];
+    inputs.upgradeableVideoCodecs = ["vc1","mpeg4","h264", "mpeg2video"];
 
     inputs.targetAudioCodecs = [
         createTargetCodec("ac3",640000,6),
@@ -1806,8 +1808,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     if (inputCheckResponse !== false) return inputCheckResponse;
 
     let presets = [];
+    let targetContainerType = "";
     switch (file.container){
         case "srt":
+            targetContainerType = "srt";
             const subtitleReWriterInterface = new NodeJSSubtitleReWriter(pathVars, null, originalFileDetails, originalFileDetails.get("directory"));
             const subtitleStreamIndex = allStreams.findIndex(stream => inputs.rewriteableSubtitleCodecs.includes(stream.codec_name));
             if (subtitleStreamIndex > -1){
@@ -1841,7 +1845,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const subtitleStreamActions = generateSubtitleStreamActions(inputs, transcoderInterface);
 
             const doesFileContainDoVi = videoStreamActions.some(action => action[1].get("formats").some(supportedFormat => supportedFormat[0] === "Dolby Vision"));
-            const targetContainerType = setTargetContainerType(inputs, file, doesFileContainDoVi);
+            targetContainerType = setTargetContainerType(inputs, file, doesFileContainDoVi);
             const currentContainerType = file.container.toLowerCase();
             const presetProgram = `.${currentContainerType}.${targetContainerType}`;
 
@@ -1925,7 +1929,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             break;
     }
 
-    console.info(`Found preset for ${originalFileDetails.get("name")}: `,presets);
+    const mainPreset = presets.pop();
+    console.info(`Found preset for ${originalFileDetails.get("name")}: `);
+    console.info(presets);
+    console.info(mainPreset)
     presets.forEach((preset,index) => {
         console.info(`Start executing task(${index + 1}/${presets.length}), Task preset:`);
         console.info(preset)
@@ -1934,13 +1941,11 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         console.info(presetOutput);
         response[`preset${index}Log`] = presetOutput;
     })
-    console.info("Finished all Tasks!");
+    console.info("Finished all sub-tasks!");
 
-    return response
-
-    response.container = targetContainerType;
+    response.container = `.${targetContainerType}`;
     response.processFile = true;
-    response.preset = presets;
+    response.preset = mainPreset;
     response.FFmpegMode = true;
     response.reQueueAfter = true;
     return response;
