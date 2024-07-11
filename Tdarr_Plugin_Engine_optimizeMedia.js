@@ -583,7 +583,7 @@ class FFMpegTranscoder{
                     preset = (mappedStreamId = 0) => {
                         const newMappedStreamId = ffmpegOnlyModeDisabled ? 0 : mappedStreamId;
                         return [
-                            `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -vn `}-map 0:a:${newActionStreamId} -c:a:${newMappedStreamId} ${newActionCodec.split(":")[0]} ${newActionBitrate && `-b:a:${newMappedStreamId} ${newActionBitrate / 1000}k`} -ac:a:${newMappedStreamId} ${newActionChannels}${ffmpegOnlyModeDisabled && ` -strict unofficial "${exportFile}"`}`,
+                            `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -vn `}-map 0:a:${newActionStreamId} -c:a:${newMappedStreamId} ${newActionCodec.split(":")[0]} ${newActionBitrate && `-b:a:${newMappedStreamId} ${newActionBitrate / 1000}k`} -ac:a:${newMappedStreamId} ${newActionChannels}${ffmpegOnlyModeDisabled && ` -strict unofficial -y "${exportFile}"`}`,
                             this.ffmpegOnlyMode ? null : exportFile
                         ]
                     };
@@ -593,7 +593,7 @@ class FFMpegTranscoder{
                 preset = (mappedStreamId = 0) => {
                     const newMappedStreamId = ffmpegOnlyModeDisabled ? 0 : mappedStreamId;
                     return [
-                        `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -sn `}-map 0:s:${action[1].get("typeStreamId")} -c:s:${newMappedStreamId} ${getModifiedActionValue(action,"codec")}${ffmpegOnlyModeDisabled && `-strict unofficial "${exportFile}"`}`,
+                        `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -sn `}-map 0:s:${action[1].get("typeStreamId")} -c:s:${newMappedStreamId} ${getModifiedActionValue(action,"codec")}${ffmpegOnlyModeDisabled && `-strict unofficial -y "${exportFile}"`}`,
                         this.ffmpegOnlyMode ? null : exportFile
                     ];
                 }
