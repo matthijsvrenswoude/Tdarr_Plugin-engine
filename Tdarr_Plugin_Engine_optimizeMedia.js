@@ -1490,12 +1490,13 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
             if (indexA === -1) indexA = codecQualityOrder.length;
             if (indexB === -1) indexB = codecQualityOrder.length;
-            const aChannelCount = a[1].get("formats")[0];
-            const bChannelCount = a[1].get("formats")[0];
+
+            const aChannelCount = getModifiedActionValue(a,"formats")[0];
+            const bChannelCount = getModifiedActionValue(b,"formats")[0];
 
             if (indexA === indexB) {
                 if (aChannelCount === bChannelCount) {
-                    return b[1].get("bitrate") - a[1].get("bitrate");
+                    return getModifiedActionValue(b,"bitrate") - getModifiedActionValue(b,"bitrate");
                 }
                 return bChannelCount - aChannelCount;
             }
@@ -1555,7 +1556,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             audioStreamId++;
         });
 
-
         // Remove all non preferred language tracks if preferred ones exists.
         const toKeepAudioLanguages = inputs.to_keep_audio_languages.split(',');
         if (audioActions.some(audioAction => audioAction[0] !== Muxing.actionsEnum.DISCARD && toKeepAudioLanguages.includes(audioAction[1].get("language")))){
@@ -1568,7 +1568,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                 return audioAction;
             })
         }
-
 
         // Remove lower quality Audio tracks of the same codec and channelCount
         for (let index = audioActions.length - 1; index >= 0; index--) {
@@ -1618,6 +1617,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     const possibleTargetTrack = audioActions.find(
                         selectedAction => selectedAction[0] !== Muxing.actionsEnum.DISCARD &&
                             currentActionCodec === selectedAction[1].get("codec") &&
+                            currentActionFormat.get("globalStreamId") !== selectedAction[1].get("globalStreamId") &&
                             currentActionFormat.get("language") === selectedAction[1].get("language") &&
                             currentActionFormat.get("formats")[0] === selectedAction[1].get("formats")[0]);
                     if (possibleTargetTrack && (possibleTargetTrack[1].get("bitrate") >= currentBitratePerChannel * codecLimitMaxChannels)){
@@ -1626,7 +1626,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                         const newActionAudioFormats = currentActionAudioFormats;
                         newActionAudioFormats[0] = codecLimitMaxChannels;
                         newActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
-                        return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",newActionAudioFormats]])];
+                        return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([
+                            ["bitrate", Math.round(currentBitratePerChannel * newActionAudioFormats[0])],
+                            ["formats", newActionAudioFormats]
+                        ])];
                     }
                 }
 
@@ -1659,7 +1662,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         });
 
         const keptAudioStreamLanguages = [...new Set(audioActions.map(audioStream => {
-            if (audioStream[0] !== Muxing.actionsEnum.DISCARD){
+            if (!audioStream[1].get("formats").includes("commentary")){
                 return audioStream[1].get("language");
             }
             return null;
@@ -1667,15 +1670,10 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
 
         const bestAudioStreamsPerLanguage = keptAudioStreamLanguages.map(language => {
-            return audioActions.find(audioStream => audioStream[0] !== Muxing.actionsEnum.DISCARD && audioStream[1].get("language") === language && transcoderInterface.decodeableCodecs.get(audioStream[1].get("codec")));
-        })
+            return audioActions.find(audioStream => !audioStream[1].get("formats").includes("commentary") && audioStream[1].get("language") === language && transcoderInterface.decodeableCodecs.get(audioStream[1].get("codec")));
+        }).filter(stream => stream);
 
         bestAudioStreamsPerLanguage.forEach(bestAudioStreamPerLanguage => {
-            if (!bestAudioStreamPerLanguage){
-                response.infoLog += `Tried adding extra audio tracks for ${bestAudioStreamPerLanguage[1].get("language")} however, no transcodeable source track could be found. \n`;
-                return
-            }
-
             const bestAudioStreamLanguage = bestAudioStreamPerLanguage[1].get("language");
             const bestAudioStreamFormats = bestAudioStreamPerLanguage[1].get("formats");
             const bestAudioStreamBitrate = bestAudioStreamPerLanguage[1].get("bitrate");
@@ -1863,18 +1861,21 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     presetGeneratorInterface = new FFMpegPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface,  subtitleRewriterInterface);
                     break;
                 case ".mkv.mp4":
+                    return;
                     extractorInterface = new MKVExtractExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
                         new MKVExtractExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
                     presetGeneratorInterface = new MP4BoxPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 case ".mp4.mp4":
+                    return;
                     extractorInterface = new MP4BoxExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
                         new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
                     presetGeneratorInterface = new MP4BoxPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 case ".mp4.mkv":
+                    return;
                     extractorInterface = new MP4BoxExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
                         new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
