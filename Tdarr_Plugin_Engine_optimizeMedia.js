@@ -1868,21 +1868,21 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     presetGeneratorInterface = new FFMpegPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface,  subtitleRewriterInterface);
                     break;
                 case ".mkv.mp4":
-                    return;
+                    return response; // Temp disable non mkv to mkv
                     extractorInterface = new MKVExtractExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
                         new MKVExtractExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
                     presetGeneratorInterface = new MP4BoxPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 case ".mp4.mp4":
-                    return;
+                    return response;  // Temp disable non mkv to mkv
                     extractorInterface = new MP4BoxExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
                         new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
                     presetGeneratorInterface = new MP4BoxPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 case ".mp4.mkv":
-                    return;
+                    return response;  // Temp disable non mkv to mkv
                     extractorInterface = new MP4BoxExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
                         new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
@@ -1890,11 +1890,6 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     break;
                 default:
                     break;
-            }
-
-            //temp disable non mkvmkv programs
-            if(presetProgram !== ".mkv.mkv"){
-                return response;
             }
 
             // console.log([
