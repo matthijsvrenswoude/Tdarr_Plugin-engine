@@ -233,6 +233,7 @@ function parseCodecToFileExtension(codecName){
         ['dts:DTS-HD', 'dts'],
         ['dts:DTS', 'dts'],
         ['opus', 'opus'],
+        ['flac', 'flac'],
         ["subrip", "srt"],
         ["mov_text", "txt"]
     ]);
@@ -249,6 +250,7 @@ function parseCodecToCodecName(codecName){
         ['dts:DTS-HD', 'DTS-HD'],
         ['dts:DTS', 'DTS'],
         ['opus', 'Opus'],
+        ['flac', 'Flac'],
         ['hdmv_pgs_subtitle', 'HDMV PGS'],
         ['subrip', 'Subrip'],
         ['mov_text', 'MovText'],
@@ -473,6 +475,7 @@ class FFMpegTranscoder{
         ["ac3", true],
         ["aac:LC", true],
         ["opus", true],
+        ["flac", true],
         ["mov_text", true],
         ["subrip", true],
         ["hdmv_pgs_subtitle", false],
@@ -494,6 +497,7 @@ class FFMpegTranscoder{
         ["ac3", true],
         ["aac:LC", true],
         ["opus", true],
+        ["flac", true],
         ["mov_text", true],
         ["subrip", true],
         ["hdmv_pgs_subtitle", false],
@@ -682,6 +686,7 @@ class MP4BoxPresetGenerator {
             ["ac3", true],
             ["aac:LC", true],
             ["opus", true],
+            ["flac", false],
             ["mov_text", true],
             ["subrip", false],
             ["hdmv_pgs_subtitle", false],
@@ -743,6 +748,7 @@ class FFMpegPresetGenerator {
             ["ac3", true],
             ["aac:LC", true],
             ["opus", true],
+            ["flac", true],
             ["mov_text", false],
             ["subrip", true],
             ["hdmv_pgs_subtitle", true],
@@ -801,7 +807,7 @@ class FFMpegPresetGenerator {
             switch (this.fileMetaData.get("presetProgram")) {
                 case ".mkv.mkv":
                     preset = (mappedStreamId = 0) => [
-                        `-map 0:${copyAction[1].get("type")}:${mappedStreamId} -c:${copyAction[1].get("type")}:${mappedStreamId} copy`,
+                        `-map 0:${copyAction[1].get("type")}:${copyAction[1].get("typeStreamId")} -c:${copyAction[1].get("type")}:${mappedStreamId} copy`,
                         null
                     ];
                     break;
@@ -1477,6 +1483,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             "dts:DTS-HD MA",
             "truehd",
             "dts:DTS-HD",
+            "flac",
             "eac3",
             "dts:DTS",
             "opus",
