@@ -1162,7 +1162,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         createCodecLimit("ac3", 3,8,true), // Removes AC3 Stereo which in old movies is always unlabeled commentary
         createCodecLimit(["dts:DTS","dts:DTS-HD","dts:DTS-HD MA"], 6,8, false),
         // EnforceStrict will always discard audioTrack if it fails the set requirements
-        // EnforceStrict disabled will only discard track if no higher channel track could be found.
+        // EnforceStrict disabled will only discard track if a higher channel track is found.
         // Providing an array as codec will treat all codecs as equal.
     ];
     inputs.atmosCapableCodecs = ["truehd","eac3"];
@@ -1654,7 +1654,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                                 return selectedAction[0] !== Muxing.actionsEnum.DISCARD &&
                                     doesSelectedActionMatchCurrentCodec &&
                                     currentActionFormat.get("language") === selectedAction[1].get("language") &&
-                                    selectedAction.get("formats")[0] >= codecLimitMinChannels
+                                    selectedAction[1].get("formats")[0] >= codecLimitMinChannels
                             });
                         if (possibleBetterTrack){
                             return [Muxing.actionsEnum.DISCARD, currentActionFormat];
