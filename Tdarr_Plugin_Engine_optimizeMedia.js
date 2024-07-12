@@ -929,6 +929,7 @@ function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType
                     line = line.replaceAll("—","-");
                     line = line.replaceAll(/[A-Z]+(?:[\s-][A-Z]+)*:/g,""); // Remove Source of speech code
                     line = line.replaceAll(/([[A-Z\s-,]+]|\([A-Z\s-,]+\))/g, "") // Remove all SDH codes
+                    line = line.replaceAll(/<\/?i>/g, "") // Remove Italic opening and closing tags
                     line = line.replaceAll(/{(b|i|u|s|)[01]}/g, "") // Remove ASS codes, Example {\b1}
                     line = line.replaceAll(/{an[1-8]}/g, "") // Remove ASS codes, Example {\an1}
                     line = line.replaceAll(/[^A-Za-z0-9.,?!:’'"()\[\]♪$£€+/\-×÷=@&#%áéíóúàèìòùäëïöü\s]/g, ''); // Only keep defined chars
