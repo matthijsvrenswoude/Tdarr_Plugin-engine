@@ -1158,6 +1158,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     ];
     inputs.audioCodecLimits = [
         createCodecLimit("aac:LC", 2,6,true),
+        createCodecLimit("ac3", 3,8,true), // Removes AC3 Stereo which in old movies is always unlabeled commentary
         createCodecLimit(["dts:DTS","dts:DTS-HD","dts:DTS-HD MA"], 6,8, false),
         // EnforceStrict will always discard audioTrack if it fails the set requirements
         // EnforceStrict disabled will only discard track if no higher channel track could be found.
