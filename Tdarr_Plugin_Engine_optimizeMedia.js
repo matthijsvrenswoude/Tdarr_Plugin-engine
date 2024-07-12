@@ -1092,7 +1092,7 @@ const details = () => {
                             \\nExample:\\n
                              hdmv_pgs_subtitle
                              \\nExample:\\n
-                            hdmv_pgs_subtitle,dvd_subtitle`,
+                            hdmv_pgs_subtitle,dvd_subtitle,ass`,
             },
             {
                 name: 'to_keep_subtitle_languages',
@@ -1599,7 +1599,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
         audioActions = sortAudioStreamsOnQuality(audioActions);
 
-
+        const enforceStrictDiscardedAudioStreamIds = [];
         // Apply total channel limits per codec and Downmux 6.1 audio to 5.1 surround.
         audioActions = audioActions.map((action) => {
             if(action[0] === Muxing.actionsEnum.DISCARD) return action;
@@ -1642,6 +1642,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
                 if (currentActionChannels < codecLimitMinChannels){
                     if (codecLimitEnforceStrict){
+                        enforceStrictDiscardedAudioStreamIds.push(currentActionFormat.get("typeStreamId"));
                         return [Muxing.actionsEnum.DISCARD, currentActionFormat];
                     } else{
                         const possibleBetterTrack = audioActions.find(
@@ -1668,16 +1669,18 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             return action;
         });
 
+        const checkIfSuitableSourceStream = (audioStream) =>
+            audioStream[0] !== Muxing.actionsEnum.DISCARD || enforceStrictDiscardedAudioStreamIds.includes(audioStream[1].get("typeStreamId"));
+
         const keptAudioStreamLanguages = [...new Set(audioActions.map(audioStream => {
-            if (!audioStream[1].get("formats").includes("commentary")){
+            if (checkIfSuitableSourceStream(audioStream)){
                 return audioStream[1].get("language");
             }
             return null;
         }).filter((language) => language !== null))];
 
-
         const bestAudioStreamsPerLanguage = keptAudioStreamLanguages.map(language => {
-            return audioActions.find(audioStream => !audioStream[1].get("formats").includes("commentary") && audioStream[1].get("language") === language && transcoderInterface.decodeableCodecs.get(audioStream[1].get("codec")));
+            return audioActions.find(audioStream => checkIfSuitableSourceStream(audioStream) && audioStream[1].get("language") === language && transcoderInterface.decodeableCodecs.get(audioStream[1].get("codec")));
         }).filter(stream => stream);
 
         bestAudioStreamsPerLanguage.forEach(bestAudioStreamPerLanguage => {
