@@ -477,7 +477,7 @@ class FFMpegTranscoder{
     originalFile = null;
     fileActions = [];
     ffmpegOnlyMode = false;
-    userGPUPlatform = null;
+    installedGPUPlatform = null;
     preferredEncodingSpeed = 0;
     universalVideoQuality = 100;
 
@@ -534,7 +534,7 @@ class FFMpegTranscoder{
         this.programPath = pathVars.get("ffmpeg");
         this.originalFile = originalFile;
         this.savePath = savePath;
-        this.userGPUPlatform = inputs.userGPUPlatform;
+        this.installedGPUPlatform = inputs.installedGPUPlatform;
         this.preferredEncodingSpeed = inputs.preferredEncodingSpeed;
         this.universalVideoQuality = inputs.universalVideoQuality;
 
@@ -587,7 +587,7 @@ class FFMpegTranscoder{
         const newPixelFormat = newActionFormats && newActionFormats[0][0].includes("10le") ? "p010le" : null;
         const pixelFormatPresetPart = `${newPixelFormat && `-pix_fmt ${newPixelFormat}`}`;
         const gpuPlatformsEnum = getGPUPlatforms();
-        switch (this.userGPUPlatform){
+        switch (this.installedGPUPlatform){
             case gpuPlatformsEnum.NVIDIARTX:
                 const presetTuneSetting = calculateTranscodingTuneSetting(this.preferredEncodingSpeed, 1, 7, true)
                 const cqTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 1)
@@ -611,7 +611,7 @@ class FFMpegTranscoder{
             case gpuPlatformsEnum.NONE:
             default:
                 const crfTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 1);
-                return `libx265 ${newActionFormats && newActionFormats[0][0]} -crf${crfTuneSetting} -preset slow`
+                return `libx265 ${newActionFormats && newActionFormats[0][0]} -crf ${crfTuneSetting} -preset slow`
         }
     }
 
