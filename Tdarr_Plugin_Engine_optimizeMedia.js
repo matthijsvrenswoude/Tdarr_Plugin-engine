@@ -33,6 +33,17 @@ function createTargetCodec(targetCodec,targetBitrate,targetChannels) {
     ]);
 }
 
+
+function getGPUPlatforms() {
+    return Object.freeze({
+        NONE: "None",
+        NVIDIARTX: "Nvidia RTX",
+        INTELARC: "Intel Arc",
+        AMDRX: "AMD RX",
+        APPLESILICON: "Apple Silicon",
+    })
+}
+
 function getLanguageDictionary(){
     return new Map([
         ["und", ["und", "Undefined"]],
@@ -270,6 +281,13 @@ function getModifiedActionValue(action,property, noFallback = false){
     return null;
 }
 
+// userSetting should be where 0 = worst and 100 equal best, otherwise invertUserSetting must be used.
+calculateTranscodingTuneSetting = (userSetting, lowestQualityValue, highestQualityValue, invertUserSetting = false) => {
+    if (invertUserSetting) userSetting = 100 - userSetting;
+    const newUserTuneSetting = ((userSetting - 0) * (highestQualityValue - lowestQualityValue)) / 100 + lowestQualityValue;
+    return lowestQualityValue < highestQualityValue ? Math.ceil(newUserTuneSetting) : Math.floor(newUserTuneSetting);
+}
+
 //
 //  Classes
 //
@@ -459,6 +477,9 @@ class FFMpegTranscoder{
     originalFile = null;
     fileActions = [];
     ffmpegOnlyMode = false;
+    userGPUPlatform = null;
+    preferredEncodingSpeed = 0;
+    universalVideoQuality = 100;
 
     decodeableCodecs = new Map([
         ["h264", true],
@@ -509,10 +530,13 @@ class FFMpegTranscoder{
     }
 
 
-    constructor(pathVars,originalFile,savePath) {
+    constructor(pathVars,originalFile,savePath,inputs) {
         this.programPath = pathVars.get("ffmpeg");
         this.originalFile = originalFile;
         this.savePath = savePath;
+        this.userGPUPlatform = inputs.userGPUPlatform;
+        this.preferredEncodingSpeed = inputs.preferredEncodingSpeed;
+        this.universalVideoQuality = inputs.universalVideoQuality;
 
         if(pathVars.has("ffmpegfdk")){
             this.customFFmpegInstalls.push(
@@ -558,6 +582,39 @@ class FFMpegTranscoder{
         })
     }
 
+    generateToH265PresetGPUPlatform(action){
+        const newActionFormats = getModifiedActionValue(action,"formats", true);
+        const newPixelFormat = newActionFormats && newActionFormats[0][0].includes("10le") ? "p010le" : null;
+        const pixelFormatPresetPart = `${newPixelFormat && `-pix_fmt ${newPixelFormat}`}`;
+        const gpuPlatformsEnum = getGPUPlatforms();
+        switch (this.userGPUPlatform){
+            case gpuPlatformsEnum.NVIDIARTX:
+                const presetTuneSetting = calculateTranscodingTuneSetting(this.preferredEncodingSpeed, 1, 7, true)
+                const cqTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 1)
+                return `hevc_nvenc ${pixelFormatPresetPart} -rc vbr -tune uhq -preset p${presetTuneSetting} -cq ${cqTuneSetting}`;
+                break;
+            case gpuPlatformsEnum.INTELARC:
+                // Preset still untested
+                const qvbrTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 1);
+                return `hevc_qsv ${pixelFormatPresetPart} -qvbr ${qvbrTuneSetting} -preset quality`
+                break;
+            case gpuPlatformsEnum.AMDRX:
+                // Preset still untested
+                const qpTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 0);
+                return `hevc_amf ${pixelFormatPresetPart} -b:v 0 -qp ${qpTuneSetting} -preset quality`
+                break;
+            case gpuPlatformsEnum.APPLESILICON:
+                // Preset still untested
+                const qTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 1, 100);
+                return `hevc_videotoolbox ${pixelFormatPresetPart} -b:v 0 -q:v ${qTuneSetting} -preset slow`
+                break;
+            case gpuPlatformsEnum.NONE:
+            default:
+                const crfTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 1);
+                return `libx265 ${newActionFormats && newActionFormats[0][0]} -crf${crfTuneSetting} -preset slow`
+        }
+    }
+
     executeAction(action){
         const newFileExtension = parseCodecToFileExtension(getModifiedActionValue(action,"codec"))
         const newFileName = `${this.originalFile.get("baseName")}.${action[1].get("language")}.${action[1].get("typeStreamId")}.${newFileExtension}`;
@@ -567,10 +624,8 @@ class FFMpegTranscoder{
 
         switch (action[1].get("type")){
             case "v":
-                const newActionFormats = getModifiedActionValue(action,"formats", true);
-                const newPixelFormat = newActionFormats && newActionFormats[0][0].includes("10le") ? "p010le" : null;
                 preset = (mappedStreamId = 0) => [
-                    `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -an `} -map 0:v:${action[1].get("typeStreamId")} -c:v:${mappedStreamId} hevc_nvenc ${newPixelFormat && `-pix_fmt ${newPixelFormat}`}  -rc vbr -tune hq -preset p7 -cq 1 ${ffmpegOnlyModeDisabled && ` -strict unofficial "${exportFile}"`}`,
+                    `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -an `} -map 0:v:${action[1].get("typeStreamId")} -c:v:${mappedStreamId} ${this.generateToH265PresetGPUPlatform(action)} ${ffmpegOnlyModeDisabled && ` -strict unofficial "${exportFile}"`}`,
                     this.ffmpegOnlyMode ? null : exportFile
                 ];
                 break
@@ -621,9 +676,9 @@ class DoViToolsMuxer {
     FFMpegTranscoder = null;
     MKVExtractExtractor = null
 
-    constructor(pathVars,originalFile,workingDirectory) {
+    constructor(pathVars,originalFile,workingDirectory, inputs) {
         this.programPath = pathVars.get("dovitool");
-        this.ffmpegTranscoder = new FFMpegTranscoder(pathVars,originalFile,workingDirectory);
+        this.ffmpegTranscoder = new FFMpegTranscoder(pathVars,originalFile,workingDirectory, inputs);
         this.MKVExtractExtractor = new MKVExtractExtractor(pathVars,originalFile,workingDirectory);
     }
 
@@ -999,7 +1054,39 @@ const details = () => {
         Tags: "plugin-state-stable,pre-processing,ffmpeg,configurable",
         Inputs: [
             {
-                name: 'target_container_type',
+                name: 'Universal Video Quality',
+                type: 'number',
+                defaultValue: 100,
+                inputUI: {
+                    type: 'number'
+                },
+                tooltip: `Set the quality target for any transcode (0-100). \n
+                100 equals to most hardware demanding, resulting in highest quality and smallest files. \n
+                0 equals to least hardware demanding, resulting in low quality and large file sizes.`
+            },
+            {
+                name: 'Preferred Encoding Speed',
+                type: 'number',
+                defaultValue: 0,
+                inputUI: {
+                    type: 'number'
+                },
+                tooltip: `Set the encoding speed for any transcode (0-100). \n
+                0 equals to slowest, resulting in highest quality and smallest files. \n
+                100 equals to highest, resulting in low quality and large file sizes.`
+            },
+            {
+                name: 'Installed GPU Platform',
+                type: 'string',
+                defaultValue: 'None',
+                inputUI: {
+                    type: 'dropdown',
+                    options: Object.values(getGPUPlatforms()),
+                },
+                tooltip: `Choose the correct GPU in your system to allow hardware acceleration on transcoding jobs`
+            },
+            {
+                name: 'Target Container Type',
                 type: 'string',
                 defaultValue: 'Original',
                 inputUI: {
@@ -1013,7 +1100,7 @@ const details = () => {
                 tooltip: `Sets the target container, for all the processed media`
             },
             {
-                name: 'dovi_target_container_type',
+                name: 'Dolby Vision Target Container Type',
                 type: 'string',
                 defaultValue: 'MP4',
                 inputUI: {
@@ -1026,7 +1113,7 @@ const details = () => {
                 tooltip: `Sets the target container, for all Dolby Vision media`
             },
             {
-                name: 'upgrade_legacy_video',
+                name: 'Upgrade Legacy Video Codecs',
                 type: 'boolean',
                 defaultValue: true,
                 inputUI: {
@@ -1039,7 +1126,7 @@ const details = () => {
                 tooltip: 'Allow upgrade of legacy video codecs to H265/HEVC'
             },
             {
-                name: "to_remove_video_codecs",
+                name: "To Remove Video Codecs",
                 type: 'string',
                 defaultValue: '',
                 inputUI: {
@@ -1050,7 +1137,7 @@ const details = () => {
                              mjpeg,png,gif`,
             },
             {
-                name: 'to_keep_audio_languages',
+                name: 'To Keep Audio Languages',
                 type: 'string',
                 defaultValue: 'eng,und',
                 inputUI: {
@@ -1070,33 +1157,7 @@ const details = () => {
                eng,und,nld`,
             },
             {
-                name: 'tag_title_for_audio',
-                type: 'boolean',
-                defaultValue: false,
-                inputUI: {
-                    type: 'dropdown',
-                    options: [
-                        'false',
-                        'true',
-                    ],
-                },
-                tooltip: 'Specify audio tracks with no title to be tagged with the number of channels they contain.'
-            },
-            {
-                name: "to_remove_subtitle_codecs",
-                type: 'string',
-                defaultValue: '',
-                inputUI: {
-                    type: 'text',
-                },
-                tooltip: `Specify key words here for subtitle tracks you'd like to have removed.
-                            \\nExample:\\n
-                             hdmv_pgs_subtitle
-                             \\nExample:\\n
-                            hdmv_pgs_subtitle,dvd_subtitle,ass`,
-            },
-            {
-                name: 'to_keep_subtitle_languages',
+                name: 'To Keep Subtitle Languages',
                 type: 'string',
                 defaultValue: 'eng',
                 inputUI: {
@@ -1111,7 +1172,20 @@ const details = () => {
                    eng,jpn`,
             },
             {
-                name: 'cleanup_text_subtitles',
+                name: "To Remove Subtitle Codecs",
+                type: 'string',
+                defaultValue: '',
+                inputUI: {
+                    type: 'text',
+                },
+                tooltip: `Specify key words here for subtitle tracks you'd like to have removed.
+                            \\nExample:\\n
+                             hdmv_pgs_subtitle
+                             \\nExample:\\n
+                            hdmv_pgs_subtitle,dvd_subtitle,ass`,
+            },
+            {
+                name: 'Rewrite Text Subtitles',
                 type: 'boolean',
                 defaultValue: true,
                 inputUI: {
@@ -1124,7 +1198,7 @@ const details = () => {
                 tooltip: 'Allow clean up of Text subtitles'
             },
             {
-                name: 'temporary_force_clean',
+                name: 'Temporary Force Clean',
                 type: 'boolean',
                 defaultValue: false,
                 inputUI: {
@@ -1145,11 +1219,18 @@ const details = () => {
 // Mains
 //
 
-
-const plugin = (file, librarySettings, inputs, otherArguments) => {
+const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     const lib = require('../methods/lib')();
-    inputs = lib.loadDefaultValues(inputs, details);
-    const languageDictionary = getLanguageDictionary();
+    rawInputs = lib.loadDefaultValues(rawInputs, details);
+    const inputs = {}
+    Object.entries(rawInputs).forEach(([key, value]) => {
+        inputs[`${key.charAt(0).toLowerCase()}${key.slice(1).replaceAll(" ", "")}`] = value;
+    });
+
+    inputs.installedGPUPlatform = Object.entries(getGPUPlatforms()).find(([, platformName]) =>
+        platformName === inputs.installedGPUPlatform)?.[0] ?? getGPUPlatforms().NONE;
+
+    // hevc_nvenc ${newPixelFormat && `-pix_fmt ${newPixelFormat}`}  -rc vbr -tune hq -preset p7 -cq 1
 
     inputs.upgradeableVideoCodecs = ["vc1","mpeg4","h264", "mpeg2video"];
 
@@ -1170,6 +1251,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
     inputs.rewriteableSubtitleCodecs = ["subrip","mov_text"];
 
+    const languageDictionary = getLanguageDictionary();
     const allStreams = file.ffProbeData.streams;
 
     function getFileDetails(file){
@@ -1228,7 +1310,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         if(file.get("name").includes("-transcoded")){
             return response;
         }
-        if (inputs.temporary_force_clean){
+        if (inputs.temporaryForceClean){
             return false;
         }
         if (mediaTitle.includes("[ReOrganized]")) {
@@ -1249,7 +1331,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     function checkIfInputFieldsAreEmpty(inputs){
-        if (inputs.to_keep_audio_languages === '') {
+        if (inputs.toKeepAudioLanguages === '') {
             response.infoLog += '☒Audio Language/s not set, please configure required options. Skipping this plugin.  \n';
             response.processFile = false;
             return response;
@@ -1286,16 +1368,16 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     function setTargetContainerType(inputs, file, doesFileContainDoVi){
         const originalContainer = file.container.toLowerCase();
         if (doesFileContainDoVi){
-            const doviTargetContainerType = inputs.dovi_target_container_type;
+            const doviTargetContainerType = inputs.dolbyVisionTargetContainerType;
             if (doviTargetContainerType === "Original"){
                 return originalContainer;
             }
             return `${doviTargetContainerType.toLowerCase()}`;
         }
-        if (inputs.target_container_type === "MKV"){
+        if (inputs.targetContainerType === "MKV"){
             return "mkv";
         }
-        if (inputs.target_container_type === "MP4"){
+        if (inputs.targetContainerType === "MP4"){
             return "mp4";
         }
         return originalContainer;
@@ -1380,7 +1462,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     function generateVideoStreamActions(inputs, transcoderInterface){
-        const toRemoveVideoCodecs = inputs.to_remove_video_codecs.split(',');
+        const toRemoveVideoCodecs = inputs.toRemoveVideoCodecs.split(',');
         let videoActions = [];
         let videoStreamsId = 0;
         allStreams.forEach((currentStream, globalStreamId) => {
@@ -1414,7 +1496,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
                     currentStreamAction = Muxing.actionsEnum.COPYDOVI
                 } else{
                     currentStreamAction = Muxing.actionsEnum.COPY
-                    if (inputs.upgrade_legacy_video && inputs.upgradeableVideoCodecs.includes(currentStreamCodec) && transcoderInterface.decodeableCodecs.get(currentStreamCodec)){
+                    if (inputs.upgradeLegacyVideoCodecs && inputs.upgradeableVideoCodecs.includes(currentStreamCodec) && transcoderInterface.decodeableCodecs.get(currentStreamCodec)){
                         currentStreamAction = Muxing.actionsEnum.MODIFY;
                         const currentPixelFormat = currentStreamSpecialFormats[0][0];
                         let currentStreamModifications = [["codec","hevc"]];
@@ -1566,7 +1648,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         });
 
         // Remove all non preferred language tracks if preferred ones exists.
-        const toKeepAudioLanguages = inputs.to_keep_audio_languages.split(',');
+        const toKeepAudioLanguages = inputs.toKeepAudioLanguages.split(',');
         if (audioActions.some(audioAction => audioAction[0] !== Muxing.actionsEnum.DISCARD && toKeepAudioLanguages.includes(audioAction[1].get("language")))){
             audioActions = audioActions.map(audioAction => {
                 const currentAudioActionLanguage = audioAction[1].get("language");
@@ -1728,7 +1810,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
     }
 
     function generateSubtitleStreamActions(inputs, transcoderInterface){
-        const toKeepSubtitleLanguages = inputs.to_keep_subtitle_languages.split(',');
+        const toKeepSubtitleLanguages = inputs.toKeepSubtitleLanguages.split(',');
         let subtitleActions = [];
         let subtitleStreamId = 0;
         allStreams.forEach((currentStream, globalStreamId) => {
@@ -1742,7 +1824,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const currentStreamIsHearingImpaired = currentStream?.disposition?.hearing_impaired ?? 0;
             const currentStreamIsVisualImpaired = currentStream?.disposition?.visual_impaired ?? 0;
             const isCommentaryTrack = currentStreamTitle.includes('commentary') || currentStreamTitle.includes('description') || currentStreamTitle.includes('sdh') || currentStreamIsCommentary || currentStreamIsHearingImpaired || currentStreamIsVisualImpaired;
-            const toRemoveSubtitleCodecs = inputs.to_remove_subtitle_codecs.split(',');
+            const toRemoveSubtitleCodecs = inputs.toRemoveSubtitleCodecs.split(',');
             const keepCurrentStream = toKeepSubtitleLanguages.includes(currentStreamLanguage) && !toRemoveSubtitleCodecs.includes(currentStreamCodec) && !isCommentaryTrack;
 
             if (currentStreamTitle.includes('forced') || currentStreamIsForced){
@@ -1760,7 +1842,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
 
             let currentStreamAction = Muxing.actionsEnum.DISCARD;
             if(keepCurrentStream){
-                if (inputs.cleanup_text_subtitles && inputs.rewriteableSubtitleCodecs.includes(currentStreamCodec)){
+                if (inputs.rewriteTextSubtitles && inputs.rewriteableSubtitleCodecs.includes(currentStreamCodec)){
                     currentStreamAction = Muxing.actionsEnum.REWRITE;
                 } else{
                     currentStreamAction = Muxing.actionsEnum.COPY;
@@ -1848,7 +1930,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
         default:
             const newFileTitle = `${cleanMediaTitle(currentMediaTitle).replace("[Organized]","").replace("[ReOrganized]","").trim()} [ReOrganized]`;
 
-            let transcoderInterface = new FFMpegTranscoder(pathVars, originalFileDetails, cacheFileDirectory);
+            let transcoderInterface = new FFMpegTranscoder(pathVars, originalFileDetails, cacheFileDirectory, inputs);
 
             const videoStreamActions = generateVideoStreamActions(inputs, transcoderInterface);
             const audioStreamActions = generateAudioStreamActions(inputs, transcoderInterface);
@@ -1860,7 +1942,7 @@ const plugin = (file, librarySettings, inputs, otherArguments) => {
             const presetProgram = `.${currentContainerType}.${targetContainerType}`;
 
             let extractorInterface = null;
-            let videoDoViMuxerInterface = new DoViToolsMuxer(pathVars, originalFileDetails, cacheFileDirectory);
+            let videoDoViMuxerInterface = new DoViToolsMuxer(pathVars, originalFileDetails, cacheFileDirectory, inputs);
             let presetGeneratorInterface = null;
             let subtitleRewriterInterface = null;
 
