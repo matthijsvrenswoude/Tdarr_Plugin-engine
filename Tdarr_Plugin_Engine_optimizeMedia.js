@@ -25,11 +25,12 @@ function createCodecLimit(codec,minChannels,maxChannels,enforceStrict) {
     ]);
 }
 
-function createTargetCodec(targetCodec,targetBitrate,targetChannels) {
+function createTargetCodec(targetCodec,targetBitrate,targetChannels, forceRecreate = false) {
     return new Map([
         ['targetCodec', targetCodec],
         ['targetBitrate', targetBitrate],
         ['targetChannels', targetChannels],
+        ['forceRecreate', forceRecreate]
     ]);
 }
 
@@ -591,7 +592,8 @@ class FFMpegTranscoder{
             case gpuPlatformsEnum.NVIDIARTX:
                 const presetTuneSetting = calculateTranscodingTuneSetting(this.preferredEncodingSpeed, 1, 7, true)
                 const cqTuneSetting = calculateTranscodingTuneSetting(this.universalVideoQuality, 51, 1)
-                return `hevc_nvenc ${pixelFormatPresetPart} -rc vbr -tune uhq -preset p${presetTuneSetting} -cq ${cqTuneSetting}`;
+                return `hevc_nvenc ${pixelFormatPresetPart} -rc vbr -tune hq -preset p${presetTuneSetting} -cq ${cqTuneSetting}`;
+                // Tried -tune -uhq (Ultra high quality), No huge quality improvement while 8x to 2x decrease in encoding speed on RTX 3080 Ti.
                 break;
             case gpuPlatformsEnum.INTELARC:
                 // Preset still untested
@@ -987,6 +989,7 @@ function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType
                     line = line.replaceAll(/<\/?i>/g, "") // Remove Italic opening and closing tags
                     line = line.replaceAll(/{(b|i|u|s|)[01]}/g, "") // Remove ASS codes, Example {\b1}
                     line = line.replaceAll(/{an[1-8]}/g, "") // Remove ASS codes, Example {\an1}
+                    line = line.replaceAll(/J'|j'|J“|j“|J"|j"/g, '♪');
                     line = line.replaceAll(/[^A-Za-z0-9.,?!:’'"()\[\]♪$£€+/\-×÷=@&#%áéíóúàèìòùäëïöü\s]/g, ''); // Only keep defined chars
                     line = line.replaceAll("♪♪","♪");
                     line = line.trim();
@@ -1234,8 +1237,9 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     inputs.upgradeableVideoCodecs = ["vc1","mpeg4","h264", "mpeg2video"];
 
     inputs.targetAudioCodecs = [
-        createTargetCodec("ac3",640000,6),
+        createTargetCodec("ac3",640000,6, true), // AC3 has a tendency to contain unlabeled commentary, commonly in stereo, in rare occasions surround
         createTargetCodec("aac:LC",256000,2),
+        // ForceRecreate will always create a target codec if a higher quality audio track exists
     ];
     inputs.audioCodecLimits = [
         createCodecLimit("aac:LC", 2,6,true),
@@ -1770,10 +1774,24 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             const bestAudioStreamLanguage = bestAudioStreamPerLanguage[1].get("language");
             const bestAudioStreamFormats = bestAudioStreamPerLanguage[1].get("formats");
             const bestAudioStreamBitrate = bestAudioStreamPerLanguage[1].get("bitrate");
+            const bestAudioStreamBitratePerChannel = bestAudioStreamBitrate / bestAudioStreamFormats[0]
 
             inputs.targetAudioCodecs.forEach((targetCodec) => {
-                const doesAudioAlreadyExists = audioActions.find(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec") && selectedAudioStream[1].get("language") === bestAudioStreamLanguage);
-                if (!doesAudioAlreadyExists){
+                const similarAudioIndex = audioActions.findIndex(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec") && selectedAudioStream[1].get("language") === bestAudioStreamLanguage);
+                let existingAudioAction = audioActions[similarAudioIndex] ?? null;
+                const doesAudioAlreadyExists = similarAudioIndex !== -1;
+                let canForceCreateAudio = false;
+                if(doesAudioAlreadyExists){
+                    canForceCreateAudio = targetCodec.get("forceRecreate") && existingAudioAction !== null && bestAudioStreamBitratePerChannel > existingAudioAction[1].get("bitrate") / existingAudioAction[1].get("formats")[0];
+                }
+
+                if (!doesAudioAlreadyExists || canForceCreateAudio){
+                    if (canForceCreateAudio && doesAudioAlreadyExists){
+                        let newExistingAudioAction = audioActions[similarAudioIndex];
+                        newExistingAudioAction[0] = Muxing.actionsEnum.DISCARD;
+                        audioActions[similarAudioIndex] = newExistingAudioAction;
+                    }
+
                     let targetCodecCodec = targetCodec.get("targetCodec");
                     const targetCodecBitrate = targetCodec.get("targetBitrate");
                     const targetCodecChannels = targetCodec.get("targetChannels");
