@@ -1227,8 +1227,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         inputs[`${key.charAt(0).toLowerCase()}${key.slice(1).replaceAll(" ", "")}`] = value;
     });
 
-    inputs.installedGPUPlatform = Object.entries(getGPUPlatforms()).find(([, platformName]) =>
-        platformName === inputs.installedGPUPlatform)?.[0] ?? getGPUPlatforms().NONE;
+    inputs.installedGPUPlatform = inputs.installedGPUPlatform ?? getGPUPlatforms().NONE;
 
     // hevc_nvenc ${newPixelFormat && `-pix_fmt ${newPixelFormat}`}  -rc vbr -tune hq -preset p7 -cq 1
 
