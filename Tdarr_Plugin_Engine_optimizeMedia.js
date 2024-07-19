@@ -953,7 +953,7 @@ class FFMpegPresetGenerator {
     }
 }
 
-function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType = ""){
+function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType = "UTF-8"){
     const debugModeEnabled = true;
     const bannedSubtitleWords = [
         "https://", "opensubtitles", "bewerkt door", "translation by", "vertaling:", "translation:", ".com/",
@@ -984,8 +984,8 @@ function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType
                 const filteredSequenceCaptions = sequenceCaptions.map(caption => {
                     let line = caption[0];
                     line = line.replaceAll("—","-");
-                    line = line.replaceAll(/[A-Z]+(?:[\s-][A-Z]+)*:/g,""); // Remove Source of speech code
-                    line = line.replaceAll(/([[A-Z\s-,]+]|\([A-Z\s-,]+\))/g, "") // Remove all SDH codes
+                    line = line.replaceAll(/[A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+)*:/g,""); // Remove Source of speech code
+                    line = line.replaceAll(/([[A-Za-z\s-,]+]|\([A-Za-z\s-,]+\))/g, "") // Remove all SDH codes
                     line = line.replaceAll(/<\/?i>/g, "") // Remove Italic opening and closing tags
                     line = line.replaceAll(/{(b|i|u|s|)[01]}/g, "") // Remove ASS codes, Example {\b1}
                     line = line.replaceAll(/{an[1-8]}/g, "") // Remove ASS codes, Example {\an1}
@@ -1038,8 +1038,9 @@ const runCLIActivation = () => {
     if (!processArgs.includes("-i") || !processArgs.includes("-o")){
         throw "Missing input variables";
     }
+    const encodingTypeIndex = processArgs.findIndex(arg => arg === "-ie");
     const inputFilePath = processArgs[processArgs.findIndex(arg => arg === "-i") + 1];
-    const inputFileEncodingType = processArgs[processArgs.findIndex(arg => arg === "-ie") + 1];
+    const inputFileEncodingType = encodingTypeIndex !== -1 ?  processArgs[encodingTypeIndex + 1] : "UTF-8";
     const outputFilePath = processArgs[processArgs.findIndex(arg => arg === "-o") + 1];
 
     rewriteSubtitleContent(fs, inputFilePath, outputFilePath, inputFileEncodingType);
@@ -1774,12 +1775,21 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             const bestAudioStreamLanguage = bestAudioStreamPerLanguage[1].get("language");
             const bestAudioStreamFormats = bestAudioStreamPerLanguage[1].get("formats");
             const bestAudioStreamBitrate = bestAudioStreamPerLanguage[1].get("bitrate");
-            const bestAudioStreamBitratePerChannel = bestAudioStreamBitrate / bestAudioStreamFormats[0]
+            const bestAudioStreamBitratePerChannel = bestAudioStreamBitrate / bestAudioStreamFormats[0];
 
             inputs.targetAudioCodecs.forEach((targetCodec) => {
-                const similarAudioIndex = audioActions.findIndex(selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec") && selectedAudioStream[1].get("language") === bestAudioStreamLanguage);
-                let existingAudioAction = audioActions[similarAudioIndex] ?? null;
-                const doesAudioAlreadyExists = similarAudioIndex !== -1;
+                function findAllIndices(arr, condition) {
+                    return arr.reduce((acc, elem, index) => {
+                        if (condition(elem, index, arr)) {
+                            acc.push(index);
+                        }
+                        return acc;
+                    }, []);
+                }
+                const similarAudioStreamIndexes = findAllIndices(audioActions, selectedAudioStream => selectedAudioStream[0] !== Muxing.actionsEnum.DISCARD && selectedAudioStream[1].get("codec") === targetCodec.get("targetCodec") && selectedAudioStream[1].get("language") === bestAudioStreamLanguage);
+
+                let existingAudioAction = similarAudioStreamIndexes[0] ? audioActions[similarAudioStreamIndexes[0]] : null;
+                const doesAudioAlreadyExists = similarAudioStreamIndexes.length > 0;
                 let canForceCreateAudio = false;
                 if(doesAudioAlreadyExists){
                     canForceCreateAudio = targetCodec.get("forceRecreate") && existingAudioAction !== null && bestAudioStreamBitratePerChannel > existingAudioAction[1].get("bitrate") / existingAudioAction[1].get("formats")[0];
@@ -1787,9 +1797,11 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
 
                 if (!doesAudioAlreadyExists || canForceCreateAudio){
                     if (canForceCreateAudio && doesAudioAlreadyExists){
-                        let newExistingAudioAction = audioActions[similarAudioIndex];
-                        newExistingAudioAction[0] = Muxing.actionsEnum.DISCARD;
-                        audioActions[similarAudioIndex] = newExistingAudioAction;
+                        similarAudioStreamIndexes.forEach(similarAudioIndex => {
+                            let newExistingAudioAction = audioActions[similarAudioIndex];
+                            newExistingAudioAction[0] = Muxing.actionsEnum.DISCARD;
+                            audioActions[similarAudioIndex] = newExistingAudioAction;
+                        })
                     }
 
                     let targetCodecCodec = targetCodec.get("targetCodec");
