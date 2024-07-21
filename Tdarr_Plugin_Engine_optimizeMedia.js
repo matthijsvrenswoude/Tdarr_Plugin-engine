@@ -35,10 +35,10 @@ function createTargetCodec(targetCodec,targetBitrate,targetChannels, forceRecrea
 }
 
 
-function createForceCodecTranscode(originalCodec,targetCodec) {
+function createForceCodecTranscode(originalCodec, targetCodec, targetBitrate) {
     return new Map([
         ['originalCodec', originalCodec],
-        ['targetCodec', targetCodec]
+        ['targetCodec', targetCodec],
     ]);
 }
 
@@ -272,8 +272,8 @@ function parseCodecToCodecName(codecName){
         ['dts:DTS', 'DTS'],
         ['opus', 'Opus'],
         ['flac', 'Flac'],
-        ['pcm_s24le', '24-Bit WAV'],
-        ['pcm_s16le', '16-Bit WAV'],
+        ['pcm_s24le', 'WAV 24-Bit'],
+        ['pcm_s16le', 'WAV 16-Bit'],
         ['hdmv_pgs_subtitle', 'HDMV PGS'],
         ['subrip', 'Subrip'],
         ['mov_text', 'MovText'],
@@ -648,7 +648,7 @@ class FFMpegTranscoder{
                 break
             case "a":
                 const newActionCodec = getModifiedActionValue(action,"codec");
-                const newActionBitrate = getModifiedActionValue(action, "bitrate", true);
+                let newActionBitrate = getModifiedActionValue(action, "bitrate", true);
                 const newActionChannels = getModifiedActionValue(action,"formats")[0];
                 const potentialCustomPreset = this.customFFmpegInstalls.find(install => install.get("applyToCodec") === newActionCodec && install.get("decodeableCodecs").get(newActionCodec) && install.get("encodeableCodecs").get(newActionCodec));
                 const newActionStreamId = action[1].get("typeStreamId");
@@ -658,8 +658,24 @@ class FFMpegTranscoder{
                 } else{
                     preset = (mappedStreamId = 0) => {
                         const newMappedStreamId = ffmpegOnlyModeDisabled ? 0 : mappedStreamId;
+                        let additionalFFmpegSettings = "";
+                        const targetCodec = getModifiedActionValue(action,"codec",false);
+                        if(targetCodec === "flac"){
+                            newActionBitrate = null;
+                            additionalFFmpegSettings = "-compression_level 12";
+                        }
+
+                        const audioPresetParts = [];
+                        if(ffmpegOnlyModeDisabled) audioPresetParts.push(`${this.programPath} -i "${this.originalFile.get("complete")}" -vn`);
+                        audioPresetParts.push(`-map 0:a:${newActionStreamId}`);
+                        audioPresetParts.push(`-c:a:${newMappedStreamId} ${newActionCodec.split(":")[0]}`);
+                        if(newActionBitrate) audioPresetParts.push(`-b:a:${newMappedStreamId} ${newActionBitrate / 1000}k`);
+                        audioPresetParts.push(`-ac:a:${newMappedStreamId} ${newActionChannels}`);
+                        if(additionalFFmpegSettings) audioPresetParts.push(additionalFFmpegSettings);
+                        if(ffmpegOnlyModeDisabled) audioPresetParts.push(`-strict unofficial -y "${exportFile}"`);
+
                         return [
-                            `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -vn `}-map 0:a:${newActionStreamId} -c:a:${newMappedStreamId} ${newActionCodec.split(":")[0]} ${newActionBitrate && `-b:a:${newMappedStreamId} ${newActionBitrate / 1000}k`} -ac:a:${newMappedStreamId} ${newActionChannels}${ffmpegOnlyModeDisabled && ` -strict unofficial -y "${exportFile}"`}`,
+                            audioPresetParts.join(" "),
                             this.ffmpegOnlyMode ? null : exportFile
                         ]
                     };
@@ -668,8 +684,15 @@ class FFMpegTranscoder{
             case "s":
                 preset = (mappedStreamId = 0) => {
                     const newMappedStreamId = ffmpegOnlyModeDisabled ? 0 : mappedStreamId;
+
+                    const subtitlePresetParts = [];
+                    if(ffmpegOnlyModeDisabled) subtitlePresetParts.push(`${this.programPath} -i "${this.originalFile.get("complete")}" -sn`);
+                    subtitlePresetParts.push(`-map 0:s:${action[1].get("typeStreamId")}`);
+                    subtitlePresetParts.push(`-c:s:${newMappedStreamId} ${getModifiedActionValue(action,"codec")}`);
+                    if(ffmpegOnlyModeDisabled) subtitlePresetParts.push(`-strict unofficial -y "${exportFile}"`);
+
                     return [
-                        `${ffmpegOnlyModeDisabled && `${this.programPath} -i "${this.originalFile.get("complete")}" -sn `}-map 0:s:${action[1].get("typeStreamId")} -c:s:${newMappedStreamId} ${getModifiedActionValue(action,"codec")}${ffmpegOnlyModeDisabled && `-strict unofficial -y "${exportFile}"`}`,
+                        subtitlePresetParts.join(" "),
                         this.ffmpegOnlyMode ? null : exportFile
                     ];
                 }
@@ -1648,7 +1671,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                 currentStreamCodecTag = `${currentStreamCodecTag}:${currentStreamProfile}`;
             }
             const currentStreamChannels = currentStream?.channels;
-            const currentStreamChannelLayout = currentStream?.channel_layout;
+            const currentStreamChannelLayout = currentStream?.channel_layout ?? parseChannelsToChannelLayout(currentStreamChannels);
             const currentStreamIsCommentary = currentStream?.disposition?.comment ?? 0;
             const currentStreamIsHearingImpaired = currentStream?.disposition?.hearing_impaired ?? 0;
             const currentStreamIsVisualImpaired = currentStream?.disposition?.visual_impaired ?? 0;
@@ -1779,7 +1802,10 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                 return (Array.isArray(transcodeCodec) && transcodeCodec.includes(currentActionCodec)) || transcodeCodec === currentActionCodec;
             }) ?? null;
             if(potentialForceTranscodeCodec){
-                return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["codec", potentialForceTranscodeCodec.get("targetCodec")]])];
+                return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([
+                    ["codec", potentialForceTranscodeCodec.get("targetCodec")],
+                    ["bitrate", currentActionBitrate]
+                ])];
             }
 
             if (inputs.PreferDownMuxSevenChannelAudio && (currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1"))){
