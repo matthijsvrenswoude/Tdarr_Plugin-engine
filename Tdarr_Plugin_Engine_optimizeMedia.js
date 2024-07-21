@@ -35,6 +35,13 @@ function createTargetCodec(targetCodec,targetBitrate,targetChannels, forceRecrea
 }
 
 
+function createForceCodecTranscode(originalCodec,targetCodec) {
+    return new Map([
+        ['originalCodec', originalCodec],
+        ['targetCodec', targetCodec]
+    ]);
+}
+
 function getGPUPlatforms() {
     return Object.freeze({
         NONE: "None",
@@ -246,6 +253,8 @@ function parseCodecToFileExtension(codecName){
         ['dts:DTS', 'dts'],
         ['opus', 'opus'],
         ['flac', 'flac'],
+        ['pcm_s24le', 'wav'],
+        ['pcm_s16le', 'wav'],
         ["subrip", "srt"],
         ["mov_text", "txt"]
     ]);
@@ -263,6 +272,8 @@ function parseCodecToCodecName(codecName){
         ['dts:DTS', 'DTS'],
         ['opus', 'Opus'],
         ['flac', 'Flac'],
+        ['pcm_s24le', '24-Bit WAV'],
+        ['pcm_s16le', '16-Bit WAV'],
         ['hdmv_pgs_subtitle', 'HDMV PGS'],
         ['subrip', 'Subrip'],
         ['mov_text', 'MovText'],
@@ -498,6 +509,8 @@ class FFMpegTranscoder{
         ["aac:LC", true],
         ["opus", true],
         ["flac", true],
+        ['pcm_s24le', true],
+        ['pcm_s16le', true],
         ["mov_text", true],
         ["subrip", true],
         ["hdmv_pgs_subtitle", false],
@@ -520,6 +533,8 @@ class FFMpegTranscoder{
         ["aac:LC", true],
         ["opus", true],
         ["flac", true],
+        ['pcm_s24le', true],
+        ['pcm_s16le', true],
         ["mov_text", true],
         ["subrip", true],
         ["hdmv_pgs_subtitle", false],
@@ -744,6 +759,8 @@ class MP4BoxPresetGenerator {
             ["aac:LC", true],
             ["opus", true],
             ["flac", false],
+            ['pcm_s24le', false],
+            ['pcm_s16le', false],
             ["mov_text", true],
             ["subrip", false],
             ["hdmv_pgs_subtitle", false],
@@ -806,6 +823,8 @@ class FFMpegPresetGenerator {
             ["aac:LC", true],
             ["opus", true],
             ["flac", true],
+            ['pcm_s24le', true],
+            ['pcm_s16le', true],
             ["mov_text", false],
             ["subrip", true],
             ["hdmv_pgs_subtitle", true],
@@ -1250,6 +1269,9 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         // EnforceStrict disabled will only discard track if a higher channel track is found.
         // Providing an array as codec will treat all codecs as equal.
     ];
+    inputs.forceAudioCodecTranscode = [
+        createForceCodecTranscode(["pcm_s16le","pcm_s24le"],"flac")
+    ]
     inputs.atmosCapableCodecs = ["truehd","eac3"];
     inputs.PreferDownMuxSevenChannelAudio = true; // Converts 6.1 Audio to 5.1
 
@@ -1572,6 +1594,8 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             "truehd",
             "dts:DTS-HD",
             "flac",
+            "pcm_s24le",
+            "pcm_s16le",
             "eac3",
             "dts:DTS",
             "opus",
@@ -1698,15 +1722,16 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                 }
                 return codecLimit.get("codec") === codecLimitCodec;
             });
+
+            const currentActionFormat = action[1];
+            const currentActionCodec = currentActionFormat.get("codec");
+            const currentActionBitrate = currentActionFormat.get("bitrate");
+            const currentActionAudioFormats = currentActionFormat.get("formats");
+            const currentActionChannels = currentActionAudioFormats[0];
             if (currentActionCodecLimit){
-                const currentActionFormat = action[1];
-                const currentActionCodec = currentActionFormat.get("codec");
-                const currentActionBitrate = currentActionFormat.get("bitrate");
-                const currentActionAudioFormats = currentActionFormat.get("formats");
                 const codecLimitMinChannels = currentActionCodecLimit.get("minChannels");
                 const codecLimitMaxChannels = currentActionCodecLimit.get("maxChannels");
                 const codecLimitEnforceStrict = currentActionCodecLimit.get("enforceStrict");
-                const currentActionChannels = currentActionAudioFormats[0];
                 if (currentActionChannels > codecLimitMaxChannels){
                     const currentBitratePerChannel = currentActionBitrate / currentActionChannels;
                     const possibleTargetTrack = audioActions.find(
@@ -1747,13 +1772,22 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                         }
                     }
                 }
-
-                if (inputs.PreferDownMuxSevenChannelAudio && (currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1"))){
-                    currentActionAudioFormats[0] = 6;
-                    currentActionAudioFormats[1] = "5.1";
-                    return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats",currentActionAudioFormats]])];
-                }
             }
+
+            const potentialForceTranscodeCodec = inputs.forceAudioCodecTranscode.find(transcodeData => {
+                const transcodeCodec = transcodeData.get("originalCodec");
+                return (Array.isArray(transcodeCodec) && transcodeCodec.includes(currentActionCodec)) || transcodeCodec === currentActionCodec;
+            }) ?? null;
+            if(potentialForceTranscodeCodec){
+                return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["codec", potentialForceTranscodeCodec.get("targetCodec")]])];
+            }
+
+            if (inputs.PreferDownMuxSevenChannelAudio && (currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1"))){
+                currentActionAudioFormats[0] = 6;
+                currentActionAudioFormats[1] = "5.1";
+                return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats", currentActionAudioFormats]])];
+            }
+
             return action;
         });
 
