@@ -21,7 +21,7 @@ function createCodecLimit(codec,minChannels,maxChannels,enforceStrict) {
         ['codec', codec],
         ['minChannels', minChannels],
         ['maxChannels', maxChannels],
-        ['strict', enforceStrict],
+        ['enforceStrict', enforceStrict],
     ]);
 }
 
@@ -1751,6 +1751,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             const currentActionBitrate = currentActionFormat.get("bitrate");
             const currentActionAudioFormats = currentActionFormat.get("formats");
             const currentActionChannels = currentActionAudioFormats[0];
+
             if (currentActionCodecLimit){
                 const codecLimitMinChannels = currentActionCodecLimit.get("minChannels");
                 const codecLimitMaxChannels = currentActionCodecLimit.get("maxChannels");
@@ -2100,7 +2101,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             //     }
             // }
             //     fs.writeFileSync(`${originalFileDirectory}/file.json`, JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
-            //     fs.writeFileSync(`${originalFileDirectory}/presets.yaml`, stringifyYAML([`mkdir "${cacheFileDirectory}"`,...tempPresets]));
+            //     fs.writeFileSync(`${originalFileDirectory}/presets.yaml`, stringifyYAML([`mkdir "${cacheFileDirectory}"`,...presets]));
 
             if (!doesFileContainDoVi && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
                 response.infoLog += `☒ File says it includes Dolby Vision, However no DoVi Metadata could be found. \n`;
