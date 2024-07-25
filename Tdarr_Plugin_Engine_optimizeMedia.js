@@ -1,3 +1,4 @@
+/* eslint-disable */
 //
 // Imports
 //
@@ -53,7 +54,11 @@ function getGPUPlatforms() {
 }
 
 function getLanguageDictionary(){
-    return new Map([
+    const unofficialLanguageCodes = [
+        ["dut", ["nl", "Dutch"]]
+    ]
+
+    const officialLanguageCodes = [
         ["und", ["und", "Undefined"]],
         ["abk", ["ab", "Abkhazian"]],
         ["aar", ["aa", "Afar"]],
@@ -238,7 +243,9 @@ function getLanguageDictionary(){
         ["yor", ["yo", "Yoruba"]],
         ["zha", ["za", "Zhuang"]],
         ["zul", ["zu", "Zulu"]]
-    ]);
+    ];
+
+    return new Map([...unofficialLanguageCodes, ...officialLanguageCodes]);
 }
 
 function parseCodecToFileExtension(codecName){
