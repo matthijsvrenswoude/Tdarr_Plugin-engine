@@ -1224,7 +1224,7 @@ const details = () => {
                    eng
     
                    \\nExample:\\n
-                   eng,jpn`,
+                   eng,nld,dut`,
             },
             {
                 name: "To Remove Subtitle Codecs",
@@ -1253,7 +1253,7 @@ const details = () => {
                 tooltip: 'Allow clean up of Text subtitles'
             },
             {
-                name: 'Temporary Force Clean',
+                name: 'Temporary Force Rewrite',
                 type: 'boolean',
                 defaultValue: false,
                 inputUI: {
@@ -1263,7 +1263,7 @@ const details = () => {
                         'true',
                     ],
                 },
-                tooltip: `Temporary allows you to re-clean your whole media library by using the scan(Fresh) button under Tdarr libraries. \\n
+                tooltip: `Temporary allows you to rewrite your whole media library by using the scan(Fresh) button under Tdarr libraries. \\n
                 Switch this setting off after usage.`
             },
         ],
