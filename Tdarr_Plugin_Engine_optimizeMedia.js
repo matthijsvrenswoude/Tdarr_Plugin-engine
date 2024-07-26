@@ -1039,7 +1039,7 @@ function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType
                     line = line.replaceAll(/{(b|i|u|s|)[01]}/g, "") // Remove ASS codes, Example {\b1}
                     line = line.replaceAll(/{an[1-8]}/g, "") // Remove ASS codes, Example {\an1}
                     line = line.replaceAll(/J'|j'|J“|j“|J"|j"/g, '♪');
-                    line = line.replaceAll(/[^A-Za-z0-9.,?!:’'"()\[\]♪$£€+/\-×÷=@&#%áéíóúàèìòùäëïöü\s]/g, ''); // Only keep defined chars
+                    line = line.replaceAll(/[^A-Za-z0-9.,…?!:’'"()\[\]♪$£€+/\-×÷=@&#%áéíóúàèìòùäëïöü\s]/g, ''); // Only keep defined chars
                     line = line.replaceAll("♪♪","♪");
                     line = line.trim();
                     line = line.replaceAll(/\s+/g, ' '); // Replace all whitespaces to a single whitespace
