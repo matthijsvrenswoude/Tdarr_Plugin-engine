@@ -1032,6 +1032,7 @@ function rewriteSubtitleContent(fs, filePath, newFilePath, inputFileEncodingType
             if(sequenceCaptions.some(filteredSequenceCaption => filteredSequenceCaption[1]) === false){
                 const filteredSequenceCaptions = sequenceCaptions.map(caption => {
                     let line = caption[0];
+                    line = line.replaceAll("...","…");
                     line = line.replaceAll("—","-");
                     line = line.replaceAll(/[A-Za-z0-9]+(?:[\s-][A-Za-z0-9]+)*:/g,""); // Remove Source of speech code
                     line = line.replaceAll(/([[A-Za-z\s-,]+]|\([A-Za-z\s-,]+\))/g, "") // Remove all SDH codes
