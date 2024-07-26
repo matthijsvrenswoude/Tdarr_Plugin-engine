@@ -10,7 +10,6 @@
 const jschardet = global.jschardet;
 const languageDetect = new global.languageDetect();
 const fs = require('fs');
-const os = require('os');
 const {execSync} = require('child_process');
 
 //
@@ -339,15 +338,17 @@ class Muxing {
 class NodeJSSubtitleReWriter{
     programPath = "";
     savePath = "";
+    tempPath = "";
     originalFile = null;
     fileActions = [];
     extractorInterface = null
 
-    constructor(pathVars, extractorInterface, originalFile,savePath) {
+    constructor(pathVars, extractorInterface, originalFile, savePath, tempFileDirectory) {
         this.programPath = `${pathVars.get("node")} ${pathVars.get("script")}`;
         this.extractorInterface = extractorInterface;
         this.originalFile = originalFile;
         this.savePath = savePath;
+        this.tempPath = tempFileDirectory;
     }
 
     loadActions(actions){
@@ -373,7 +374,7 @@ class NodeJSSubtitleReWriter{
             targetFile = this.originalFile.get("complete");
         } else{
             let extractionPreset = "";
-            [extractionPreset, targetFile] = this.extractorInterface.executeAction(action, `${os.tmpdir().replaceAll("\\","/")}/`).get("preset")();
+            [extractionPreset, targetFile] = this.extractorInterface.executeAction(action, this.tempPath).get("preset")();
             execSync(extractionPreset);
         }
         const subtitleFileCharset = jschardet.detect(fs.readFileSync(targetFile));
@@ -1974,6 +1975,8 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     }
 
     const cacheFileDirectory = getFileDetails(otherArguments.cacheFilePath)[0].replaceAll("\\","/");
+    const tempFileDirectory = `${cacheFileDirectory}/tmp/`;
+    fs.mkdirSync(tempFileDirectory);
     const originalFile = otherArguments.originalLibraryFile.file;
     const [originalFileDirectory, originalFileName,  baseFileName, fileExtension] = getFileDetails(originalFile);
     const originalFileDetails = new Map([
@@ -2002,7 +2005,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     switch (file.container){
         case "srt":
             targetContainerType = "srt";
-            const subtitleReWriterInterface = new NodeJSSubtitleReWriter(pathVars, null, originalFileDetails, originalFileDetails.get("directory"));
+            const subtitleReWriterInterface = new NodeJSSubtitleReWriter(pathVars, null, originalFileDetails, originalFileDetails.get("directory"), tempFileDirectory);
             const subtitleStreamIndex = allStreams.findIndex(stream => inputs.rewriteableSubtitleCodecs.includes(stream.codec_name));
             if (subtitleStreamIndex > -1){
                 const subtitleStream = allStreams[subtitleStreamIndex];
@@ -2049,28 +2052,28 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                     transcoderInterface.setFFMpegOnlyMode(true);
                     extractorInterface = new MKVExtractExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
-                        new MKVExtractExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
+                        new MKVExtractExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory, tempFileDirectory);
                     presetGeneratorInterface = new FFMpegPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface,  subtitleRewriterInterface);
                     break;
                 case ".mkv.mp4":
                     return response; // Temp disable non mkv to mkv
                     extractorInterface = new MKVExtractExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
-                        new MKVExtractExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
+                        new MKVExtractExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory, tempFileDirectory);
                     presetGeneratorInterface = new MP4BoxPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 case ".mp4.mp4":
                     return response;  // Temp disable non mkv to mkv
                     extractorInterface = new MP4BoxExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
-                        new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
+                        new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory, tempFileDirectory);
                     presetGeneratorInterface = new MP4BoxPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 case ".mp4.mkv":
                     return response;  // Temp disable non mkv to mkv
                     extractorInterface = new MP4BoxExtractor(pathVars, originalFileDetails, originalFileDirectory);
                     subtitleRewriterInterface = new NodeJSSubtitleReWriter(pathVars,
-                        new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory);
+                        new MP4BoxExtractor(pathVars,originalFileDetails, cacheFileDirectory), originalFileDetails, cacheFileDirectory, tempFileDirectory);
                     presetGeneratorInterface = new FFMpegPresetGenerator(pathVars, extractorInterface, transcoderInterface, videoDoViMuxerInterface, subtitleRewriterInterface);
                     break;
                 default:
