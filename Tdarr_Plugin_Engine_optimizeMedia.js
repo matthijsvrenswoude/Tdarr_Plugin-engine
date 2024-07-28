@@ -25,11 +25,12 @@ function createCodecLimit(codec,minChannels,maxChannels,enforceStrict) {
     ]);
 }
 
-function createTargetCodec(targetCodec,targetBitrate,targetChannels, forceRecreate = false) {
+function createTargetCodec(targetCodec,targetBitrate,targetChannels, strictBitrate = false, forceRecreate = false) {
     return new Map([
         ['targetCodec', targetCodec],
         ['targetBitrate', targetBitrate],
         ['targetChannels', targetChannels],
+        ['strictBitrate', strictBitrate],
         ['forceRecreate', forceRecreate]
     ]);
 }
@@ -1284,13 +1285,12 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
 
     inputs.installedGPUPlatform = inputs.installedGPUPlatform ?? getGPUPlatforms().NONE;
 
-    // hevc_nvenc ${newPixelFormat && `-pix_fmt ${newPixelFormat}`}  -rc vbr -tune hq -preset p7 -cq 1
-
     inputs.upgradeableVideoCodecs = ["vc1","mpeg4","h264", "mpeg2video"];
 
     inputs.targetAudioCodecs = [
-        createTargetCodec("ac3",640000,6, true), // AC3 has a tendency to contain unlabeled commentary, commonly in stereo, in rare occasions surround
-        createTargetCodec("aac:LC",256000,2),
+        createTargetCodec("ac3",640000,6, true, true), // AC3 has a tendency to contain unlabeled commentary, commonly in stereo, in rare occasions surround
+        createTargetCodec("aac:LC",256000,2, false, false),
+        // StrictBitrate will only create target codec if a higher quality audio track with a minimum of targetBitrate exist.
         // ForceRecreate will always create a target codec if a higher quality audio track exists
     ];
     inputs.audioCodecLimits = [
@@ -1877,12 +1877,22 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                     let targetCodecCodec = targetCodec.get("targetCodec");
                     const targetCodecBitrate = targetCodec.get("targetBitrate");
                     const targetCodecChannels = targetCodec.get("targetChannels");
+                    const targetCodecStrictBitrate = targetCodec.get("strictBitrate");
                     const newAudioStreamFormats = [...bestAudioStreamFormats];
+                    let newAudioStreamBitrate = targetCodecBitrate;
 
-                    if (bestAudioStreamBitrate >= targetCodecBitrate || bestAudioStreamBitrate === 0){
+                    if (!targetCodecStrictBitrate || (targetCodecStrictBitrate && bestAudioStreamBitrate >= targetCodecBitrate) || bestAudioStreamBitrate === 0){
+                        if(bestAudioStreamBitrate < targetCodecBitrate){
+                            newAudioStreamBitrate = bestAudioStreamBitrate;
+                        }
                         if (newAudioStreamFormats[0] > targetCodecChannels){
                             newAudioStreamFormats[0] = targetCodecChannels;
                             newAudioStreamFormats[1] = parseChannelsToChannelLayout(targetCodecChannels);
+
+                            const potentialNewAudioBitrate = Math.round(bestAudioStreamBitratePerChannel * newAudioStreamFormats[0]);
+                            if (potentialNewAudioBitrate < targetCodecBitrate){
+                                newAudioStreamBitrate = potentialNewAudioBitrate;
+                            }
                         }
 
                         audioActions.push([
@@ -1890,7 +1900,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                             bestAudioStreamPerLanguage[1],
                             new Map([
                                 ["codec", targetCodecCodec],
-                                ["bitrate", targetCodecBitrate],
+                                ["bitrate", newAudioStreamBitrate],
                                 ["title", ""],
                                 ["default", false],
                                 ["formats", newAudioStreamFormats]
