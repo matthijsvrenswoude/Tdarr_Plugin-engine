@@ -1291,7 +1291,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         createTargetCodec("ac3",640000,6, true, true), // AC3 has a tendency to contain unlabeled commentary, commonly in stereo, in rare occasions surround
         createTargetCodec("aac:LC",256000,2, false, false),
         // StrictBitrate will only create target codec if a higher quality audio track with a minimum of targetBitrate exist.
-        // ForceRecreate will always create a target codec if a higher quality audio track exists
+        // ForceRecreate will always create a target codec if a higher quality audio track exists, even if the target codec already exists.
     ];
     inputs.audioCodecLimits = [
         createCodecLimit("aac:LC", 2,6,true),
