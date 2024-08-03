@@ -1182,6 +1182,18 @@ const details = () => {
                 tooltip: 'Allow upgrade of legacy video codecs to H265/HEVC'
             },
             {
+                name: 'Upgrade Legacy Video Target Codec',
+                type: 'string',
+                defaultValue: 'HEVC',
+                inputUI: {
+                    type: 'dropdown',
+                    options: [
+                        'HEVC',
+                    ],
+                },
+                tooltip: 'Sets the target codec, for all legacy video codecs'
+            },
+            {
                 name: "To Remove Video Codecs",
                 type: 'string',
                 defaultValue: '',
@@ -1780,7 +1792,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                         newActionAudioFormats[0] = codecLimitMaxChannels;
                         newActionAudioFormats[1] = parseChannelsToChannelLayout(codecLimitMaxChannels);
                         return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([
-                            ["bitrate", Math.round(currentBitratePerChannel * newActionAudioFormats[0])],
+                            ["bitrate", Math.ceil(currentBitratePerChannel * newActionAudioFormats[0])],
                             ["formats", newActionAudioFormats]
                         ])];
                     }
@@ -1814,7 +1826,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             if(potentialForceTranscodeCodec){
                 return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([
                     ["codec", potentialForceTranscodeCodec.get("targetCodec")],
-                    ["bitrate", currentActionBitrate]
+                    ["bitrate", Math.ceil(currentActionBitrate)]
                 ])];
             }
 
@@ -1889,7 +1901,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                             newAudioStreamFormats[0] = targetCodecChannels;
                             newAudioStreamFormats[1] = parseChannelsToChannelLayout(targetCodecChannels);
 
-                            const potentialNewAudioBitrate = Math.round(bestAudioStreamBitratePerChannel * newAudioStreamFormats[0]);
+                            const potentialNewAudioBitrate = Math.ceil(bestAudioStreamBitratePerChannel * newAudioStreamFormats[0]);
                             if (potentialNewAudioBitrate < targetCodecBitrate){
                                 newAudioStreamBitrate = potentialNewAudioBitrate;
                             }
@@ -1900,7 +1912,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                             bestAudioStreamPerLanguage[1],
                             new Map([
                                 ["codec", targetCodecCodec],
-                                ["bitrate", newAudioStreamBitrate],
+                                ["bitrate", Math.ceil(newAudioStreamBitrate)],
                                 ["title", ""],
                                 ["default", false],
                                 ["formats", newAudioStreamFormats]
