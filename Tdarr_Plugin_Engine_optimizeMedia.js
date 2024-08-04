@@ -584,17 +584,21 @@ class FFMpegTranscoder{
         actions.forEach((action, index) => {
             const [actionType, actionData, actionModifications] = action;
             if (![Muxing.actionsEnum.CREATE,Muxing.actionsEnum.MODIFY].includes(actionType)) return;
-            const decodingCodec = this.decodeableCodecs.get(actionData.get("codec"));
-            let encodingCodec = this.encodeableCodecs.get(actionData.get("codec"));
+
+            const decodingCodec = actionData.get("codec");
+            const decodingCodecState = this.decodeableCodecs.get(decodingCodec);
+            const encodingCodec = actionData.get("codec");
+
+            let encodingCodecState = this.encodeableCodecs.get(encodingCodec);
             if (actionModifications.has("codec")){
-                encodingCodec = this.encodeableCodecs.get(actionModifications.get("codec"));
+                encodingCodecState = this.encodeableCodecs.get(actionModifications.get("codec"));
             }
 
             let error = [];
-            if(decodingCodec === undefined) error.push(`Failed to load action, failed to determine decoder support for codec: ${decodingCodec}`);
-            if(decodingCodec === false) error.push(`Failed to load action, FFMpeg has no decoder for codec: ${decodingCodec}`);
-            if(encodingCodec === undefined) error.push(`Failed to load action, failed to determine encoder support for codec: ${encodingCodec}`);
-            if(encodingCodec === false) error.push(`Failed to load action, FFMpeg has no encoder for codec: ${decodingCodec}`);
+            if(decodingCodecState === undefined) error.push(`Failed to load action, failed to determine decoder support for codec: ${decodingCodec}`);
+            if(decodingCodecState === false) error.push(`Failed to load action, FFMpeg has no decoder for codec: ${decodingCodec}`);
+            if(encodingCodecState === undefined) error.push(`Failed to load action, failed to determine encoder support for codec: ${encodingCodec}`);
+            if(encodingCodecState === false) error.push(`Failed to load action, FFMpeg has no encoder for codec: ${encodingCodec}`);
             if (error.length > 0) throw error.join(" ");
             toLoadActions[index] = action;
         })
@@ -1317,7 +1321,9 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         createForceCodecTranscode(["pcm_s16le","pcm_s24le"],"flac")
     ]
     inputs.atmosCapableCodecs = ["truehd","eac3"];
-    inputs.PreferDownMuxSevenChannelAudio = true; // Converts 6.1 Audio to 5.1
+
+    inputs.preferDownMuxSevenChannelAudio = true; // Converts 6.1 Audio to 5.1
+    inputs.sevenChannelAudioCodecExceptions = ["dts:DTS-HD MA"];
 
     inputs.rewriteableSubtitleCodecs = ["subrip","mov_text"];
 
@@ -1830,7 +1836,7 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                 ])];
             }
 
-            if (inputs.PreferDownMuxSevenChannelAudio && (currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1"))){
+            if (inputs.preferDownMuxSevenChannelAudio && !inputs.sevenChannelAudioCodecExceptions.includes(currentActionCodec) && (currentActionChannels === 7 || currentActionAudioFormats[1].includes("6.1"))){
                 currentActionAudioFormats[0] = 6;
                 currentActionAudioFormats[1] = "5.1";
                 return [Muxing.actionsEnum.MODIFY, currentActionFormat, new Map([["formats", currentActionAudioFormats]])];
