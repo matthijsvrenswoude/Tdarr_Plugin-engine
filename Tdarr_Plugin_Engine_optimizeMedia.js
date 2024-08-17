@@ -1293,11 +1293,58 @@ const details = () => {
 
 const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     const lib = require('../methods/lib')();
+
     rawInputs = lib.loadDefaultValues(rawInputs, details);
+
+    if(!process.argv.hasOwnProperty(0)){
+        throw "Cant retrieve script executor";
+    }
+
+    const nodePath = process.argv[0].replaceAll("\\","/");
+    let pathVars = [
+        ["node", process.argv[0].replaceAll("\\","/")],
+        ["script", `${nodePath.split("Tdarr_Node")[0]}Tdarr_Node/assets/app/plugins/Local/Tdarr_Plugin_Engine_optimizeMedia.js`],
+        ["cacheFilePath", otherArguments.cacheFilePath],
+        ["ffmpeg", otherArguments.ffmpegPath],
+        ["mkvextract", otherArguments.mkvpropeditPath?.replace("mkvpropedit","mkvextract")],
+        ["dovitool", "C:/Tdarr/DoviTool/dovi_tool.exe"],
+        ["mp4box", "C:/Program Files/GPAC/mp4box.exe"],
+    ];
+    const possibleFdkFFmpegDirectory = otherArguments.ffmpegPath.replace("/ffmpeg/","/ffmpeg-fdk/");
+    if (fs.existsSync(possibleFdkFFmpegDirectory)){
+        pathVars.push(["ffmpegfdk",possibleFdkFFmpegDirectory])
+    }
+    pathVars = new Map(pathVars);
+
     const inputs = {}
+    const args = {
+        file: {
+            meta: {
+                Title: file.meta.Title,
+                FileName: file.meta.FileName,
+            },
+            fileMedium: file.fileMedium,
+            container: file.container,
+            ffProbeData: file.ffProbeData,
+            scannerReads: {
+                mediaInfoRead: file.scannerReads.mediaInfoRead
+            }
+        },
+        originalLibraryFile : {
+            file: otherArguments.originalLibraryFile.file,
+        },
+        pathVars: pathVars
+    }
+
+    args.pathVars = [...pathVars].map(([name, value]) => ({ name, value }));
+
     Object.entries(rawInputs).forEach(([key, value]) => {
         inputs[`${key.charAt(0).toLowerCase()}${key.slice(1).replaceAll(" ", "")}`] = value;
     });
+
+    fs.writeFileSync(`C:/Tdarr/inputs.json`, JSON.stringify([args,inputs]));
+
+    args.pathVars = pathVars;
 
     inputs.installedGPUPlatform = inputs.installedGPUPlatform ?? getGPUPlatforms().NONE;
 
@@ -1328,7 +1375,8 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     inputs.rewriteableSubtitleCodecs = ["subrip","mov_text"];
 
     const languageDictionary = getLanguageDictionary();
-    const allStreams = file.ffProbeData.streams;
+
+    const allStreams = args.file.ffProbeData.streams;
 
     function getFileDetails(file){
         const fileParts = file.replaceAll("/","\\").split("\\");
@@ -1340,28 +1388,10 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         return [filePath, fileName, baseFileName, fileExtension];
     }
 
-    if(!process.argv.hasOwnProperty(0)){
-        throw "Cant retrieve script executor";
-    }
-    const nodePath = process.argv[0].replaceAll("\\","/");
-    let pathVars = [
-        ["node", nodePath],
-        ["script", `${nodePath.split("Tdarr_Node")[0]}Tdarr_Node/assets/app/plugins/Local/Tdarr_Plugin_Engine_optimizeMedia.js`],
-        ["ffmpeg", otherArguments.ffmpegPath],
-        ["mkvextract", otherArguments.mkvpropeditPath?.replace("mkvpropedit","mkvextract")],
-        ["dovitool", "C:/Tdarr/DoviTool/dovi_tool.exe"],
-        ["mp4box", "C:/Program Files/GPAC/mp4box.exe"],
-    ];
-    const possibleFdkFFmpegDirectory = otherArguments.ffmpegPath.replace("/ffmpeg/","/ffmpeg-fdk/");
-    if (fs.existsSync(possibleFdkFFmpegDirectory)){
-        pathVars.push(["ffmpegfdk",possibleFdkFFmpegDirectory])
-    }
-    pathVars = new Map(pathVars);
-
     let response = {
         processFile: false,
         preset: "",
-        container: `.${file.container}`,
+        container: `.${args.file.container}`,
         handBrakeMode: false,
         FFmpegMode: false,
         reQueueAfter: false,
@@ -1369,10 +1399,10 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     };
 
 
-    function ifFileErrorExecuteReenqueue(file, response){
-        const mediaInfoRead = file?.scannerReads?.mediaInfoRead ?? "";
-        const ffProbeErrors = file?.ffProbeData?.meta?.errors ?? [];
-        const ffProbeMetaError = file?.ffProbeData?.meta?.Error?.toLowerCase() ?? "";
+    function ifFileErrorExecuteReenqueue(args, response){
+        const mediaInfoRead = args.file.scannerReads?.mediaInfoRead ?? "";
+        const ffProbeErrors = args.file.ffProbeData?.meta?.errors ?? [];
+        const ffProbeMetaError = args.file.ffProbeData?.meta?.Error?.toLowerCase() ?? "";
         if (mediaInfoRead?.includes("EBUSY") || ffProbeErrors.length !== 0 || ffProbeMetaError.includes("error")){
             response.infoLog += "☒File has errors, Skipping..\n"  + `${mediaInfoRead} ${ffProbeMetaError} ${JSON.stringify(ffProbeErrors)}`;
             response.processFile = false;
@@ -1397,8 +1427,8 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         return false;
     }
 
-    function exitIfFileIsNotProcessable(file,response){
-        if (file.fileMedium !== 'video' && file.container !== "srt") {
+    function exitIfFileIsNotProcessable(args,response){
+        if (args.file.fileMedium !== 'video' && args.file.container !== "srt") {
             response.infoLog += '☒File is not Processable \n';
             response.processFile = false;
             return response;
@@ -1415,10 +1445,10 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         return false
     }
 
-    function getMediaTitle(file){
-        const metaTitleTag = file?.meta?.Title?.toString()?.trim() ?? "";
-        const mp4TitleTag = file?.ffProbeData?.format?.tags?.title?.trim() ?? "";
-        let mediaTitle = file?.meta?.FileName ?? "";
+    function getMediaTitle(args){
+        const metaTitleTag = args.file.meta?.Title?.toString()?.trim() ?? "";
+        const mp4TitleTag = args.file.ffProbeData?.format?.tags?.title?.trim() ?? "";
+        let mediaTitle = args.file.meta?.FileName ?? "";
         if (metaTitleTag.trim().length > 0){
             mediaTitle = metaTitleTag;
         }
@@ -1441,8 +1471,8 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             .replaceAll(",","");
     }
 
-    function setTargetContainerType(inputs, file, doesFileContainDoVi){
-        const originalContainer = file.container.toLowerCase();
+    function setTargetContainerType(inputs, args, doesFileContainDoVi){
+        const originalContainer = args.file.container.toLowerCase();
         if (doesFileContainDoVi){
             const doviTargetContainerType = inputs.dolbyVisionTargetContainerType;
             if (doviTargetContainerType === "Original"){
@@ -1963,8 +1993,6 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
                 response.infoLog += `☒Subtitle stream 0:s:${subtitleStreamId} detected as being descriptive, removing. \n`;
             } else if(toRemoveSubtitleCodecs.includes(currentStreamCodec)){
                 response.infoLog += `☒Subtitle stream detected as unwanted. removing subtitle stream 0:s:${subtitleStreamId} - ${currentStreamCodec}. \n`;
-            } else{
-                response.infoLog += `☒Subtitle stream 0:s:${subtitleStreamId} has unwanted language tag ${currentStreamLanguage}, removing. \n`;
             }
 
             let currentStreamAction = Muxing.actionsEnum.DISCARD;
@@ -2002,10 +2030,10 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         return subtitleActions;
     }
 
-    const cacheFileDirectory = getFileDetails(otherArguments.cacheFilePath)[0].replaceAll("\\","/");
+    const cacheFileDirectory = getFileDetails(args.pathVars.get("cacheFilePath"))[0].replaceAll("\\","/");
     const tempFileDirectory = `${cacheFileDirectory}/tmp/`;
     fs.mkdirSync(tempFileDirectory);
-    const originalFile = otherArguments.originalLibraryFile.file;
+    const originalFile = args.originalLibraryFile.file;
     const [originalFileDirectory, originalFileName,  baseFileName, fileExtension] = getFileDetails(originalFile);
     const originalFileDetails = new Map([
         ['directory', originalFileDirectory],
@@ -2014,9 +2042,9 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
         ['extension', fileExtension],
         ['complete', originalFile],
     ]);
-    let currentMediaTitle = getMediaTitle(file);
+    let currentMediaTitle = getMediaTitle(args);
 
-    const isFileErroredResponse = ifFileErrorExecuteReenqueue(file, response);
+    const isFileErroredResponse = ifFileErrorExecuteReenqueue(args, response);
     if (isFileErroredResponse !== false) return isFileErroredResponse;
 
     const isCleanedCheckResponse = exitIfFileIsAlreadyCleaned(originalFileDetails, inputs, currentMediaTitle, response);
@@ -2025,12 +2053,12 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
     const fileCheckResponse = exitIfFileIsNotProcessable(file, response);
     if (fileCheckResponse !== false) return fileCheckResponse;
 
-    const inputCheckResponse = checkIfInputFieldsAreEmpty(file, response);
+    const inputCheckResponse = checkIfInputFieldsAreEmpty(inputs, response);
     if (inputCheckResponse !== false) return inputCheckResponse;
 
     let presets = [];
     let targetContainerType = "";
-    switch (file.container){
+    switch (args.file.container){
         case "srt":
             targetContainerType = "srt";
             const subtitleReWriterInterface = new NodeJSSubtitleReWriter(pathVars, null, originalFileDetails, originalFileDetails.get("directory"), tempFileDirectory);
@@ -2066,8 +2094,8 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             const subtitleStreamActions = generateSubtitleStreamActions(inputs, transcoderInterface);
 
             const doesFileContainDoVi = videoStreamActions.some(action => action[1].get("formats").some(supportedFormat => supportedFormat[0] === "Dolby Vision"));
-            targetContainerType = setTargetContainerType(inputs, file, doesFileContainDoVi);
-            const currentContainerType = file.container.toLowerCase();
+            targetContainerType = setTargetContainerType(inputs, args, doesFileContainDoVi);
+            const currentContainerType = args.file.container.toLowerCase();
             const presetProgram = `.${currentContainerType}.${targetContainerType}`;
 
             let extractorInterface = null;
@@ -2126,21 +2154,21 @@ const plugin = (file, librarySettings, rawInputs, otherArguments) => {
             presetGeneratorInterface.loadActions([...videoStreamActions,...audioStreamActions,...subtitleStreamActions]);
             presets = presetGeneratorInterface.generatePresets();
 
-            // function stringifyYAML(obj, indent = 0) {
-            //     const spaces = '  '.repeat(indent);
-            //     if (Array.isArray(obj)) {
-            //         return obj.map(item => `${spaces}- ${stringifyYAML(item, indent + 1).trimStart()}`).join('\n');
-            //     } else if (typeof obj === 'object' && obj !== null) {
-            //         return Object.keys(obj).map(key => {
-            //             const value = stringifyYAML(obj[key], indent + 1).trimStart();
-            //             return `${spaces}${key}: ${value.includes('\n') ? '\n' + value : value}`;
-            //         }).join('\n');
-            //     } else {
-            //         return `${spaces}${obj}`;
-            //     }
-            // }
-            //     fs.writeFileSync(`${originalFileDirectory}/file.json`, JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
-            //     fs.writeFileSync(`${originalFileDirectory}/presets.yaml`, stringifyYAML([`mkdir "${cacheFileDirectory}"`,...presets]));
+        function stringifyYAML(obj, indent = 0) {
+            const spaces = '  '.repeat(indent);
+            if (Array.isArray(obj)) {
+                return obj.map(item => `${spaces}- ${stringifyYAML(item, indent + 1).trimStart()}`).join('\n');
+            } else if (typeof obj === 'object' && obj !== null) {
+                return Object.keys(obj).map(key => {
+                    const value = stringifyYAML(obj[key], indent + 1).trimStart();
+                    return `${spaces}${key}: ${value.includes('\n') ? '\n' + value : value}`;
+                }).join('\n');
+            } else {
+                return `${spaces}${obj}`;
+            }
+        }
+            fs.writeFileSync(`C:/Tdarr/file.json`, JSON.stringify([...videoStreamActions,...audioStreamActions,...subtitleStreamActions].map(item => [item[0],Array.from(item[1])])));
+            fs.writeFileSync(`C:/Tdarr/presets.yaml`, stringifyYAML([`mkdir "${cacheFileDirectory}"`,...presets]));
 
             if (!doesFileContainDoVi && ["dv","dovi"].some(substring => file?.meta?.FileName?.toLowerCase().includes(substring) || file?.meta?.Title?.toLowerCase().includes(substring))){
                 response.infoLog += `☒ File says it includes Dolby Vision, However no DoVi Metadata could be found. \n`;
